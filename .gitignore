@@ -1,0 +1,14 @@
+# Ignore the entire spider_date/ directory
+spider_data/
+
+# Ignore all JSON files
+*.json
+
+# Ignore all .txt files
+*.txt
+
+# Ignore miscellaneous files
+.DS_Store
+
+# But don't ignore requirements.txt
+!requirements.txt
