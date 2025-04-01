@@ -7,8 +7,15 @@ spider_data/
 # Ignore all .txt files
 *.txt
 
-# Ignore miscellaneous files
-.DS_Store
+# Ignore .env file
+.env
 
-# But don't ignore requirements.txt
+# DON'T ignore requirements.txt
 !requirements.txt
+
+###################################
+# Ignore random files and folders #
+###################################
+.ipynb_checkpoints/
+__pycache__/
+.DS_Store
