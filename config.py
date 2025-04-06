@@ -23,7 +23,7 @@ SQLITE_DB_PATH = os.path.join(SPIDER_DATA_DIR, "databases")
 # Model Provider Configuration
 # ===============================
 # Choose between: "openai", "lmstudio", "ollama"
-LLM_PROVIDER = "lmstudio"
+LLM_PROVIDER = "exo"
 
 MODELS = {
     "openai": {
@@ -48,7 +48,16 @@ MODELS = {
         "headers": lambda: {
             "Content-Type": "application/json"
         }
-    }
+    },
+    "exo": {
+        "api_url": "http://127.0.0.1:52415/v1/chat/completions",
+        "default_model": "llama-3.2-1b",
+        # "api_key": os.getenv("OPENAI_API_KEY"),
+        "headers": lambda: {
+            # "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}",
+            "Content-Type": "application/json"
+        }
+    },
 }
 
 # ===============================
