@@ -1,21 +1,16 @@
 # Ignore the entire spider_date/ directory
 spider_data/
+spider/
+.ipynb_checkpoints/
+__pycache__/
 
-# Ignore all JSON files
+# Ignore files
+.DS_Store
 *.json
-
-# Ignore all .txt files
+*.sql
 *.txt
-
-# Ignore .env file
 .env
+.pyc
 
 # DON'T ignore requirements.txt
 !requirements.txt
-
-###################################
-# Ignore random files and folders #
-###################################
-.ipynb_checkpoints/
-__pycache__/
-.DS_Store
