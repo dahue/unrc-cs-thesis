@@ -25,7 +25,7 @@ SQLITE_DB_PATH = os.path.join(SPIDER_DATA_DIR, "databases")
 # Model Provider Configuration
 # ===============================
 # Choose between: "openai", "lmstudio", "ollama"
-LLM_PROVIDER = "exo"
+LLM_PROVIDER = "lmstudio"
 
 MODELS = {
     "openai": {
@@ -38,7 +38,7 @@ MODELS = {
         }
     },
     "lmstudio": {
-        "api_url": "http://localhost:1234/v1/chat/completions",
+        "api_url": "http://Adrians-Mac-mini.local:12345/v1/chat/completions",
         "default_model": "mistral-7b-instruct",
         "headers": lambda: {
             "Content-Type": "application/json"

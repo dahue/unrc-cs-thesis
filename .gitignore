@@ -6,11 +6,13 @@ __pycache__/
 
 # Ignore files
 .DS_Store
+.env
 *.json
 *.sql
 *.txt
-.env
-.pyc
+*.csv
+*.pyc
+
 
 # DON'T ignore requirements.txt
 !requirements.txt
