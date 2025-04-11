@@ -16,7 +16,9 @@ EXPERIMENTS_DIR = os.path.join(PROJECT_ROOT, "experiments")
 
 PREPROCESSED_JSON = os.path.join(DATA_DIR, "preprocessed.json")
 PROMPTS_JSON = os.path.join(DATA_DIR, "prompts.json")
-EVAL_REPORT_JSON = os.path.join(REPORTS_DIR, "evaluation_metrics.json")
+GOLD_SQL = os.path.join(DATA_DIR, "gold_queries.sql")
+PREDICTED_SQL = os.path.join(DATA_DIR, "predicted_queries.sql")
+METRICS_REPORT_JSON = os.path.join(REPORTS_DIR, "evaluation_metrics.json")
 SQLITE_DB_PATH = os.path.join(SPIDER_DATA_DIR, "databases")
 
 # ===============================
@@ -36,7 +38,7 @@ MODELS = {
         }
     },
     "lmstudio": {
-        "api_url": "http://localhost:1234/v1/chat/completions",
+        "api_url": "http://Adrians-Mac-mini.local:12345/v1/chat/completions",
         "default_model": "mistral-7b-instruct",
         "headers": lambda: {
             "Content-Type": "application/json"
@@ -48,7 +50,16 @@ MODELS = {
         "headers": lambda: {
             "Content-Type": "application/json"
         }
-    }
+    },
+    "exo": {
+        "api_url": "http://1.1.1.1:52415/v1/chat/completions",
+        "default_model": "llama-3.2-1b",
+        # "api_key": os.getenv("OPENAI_API_KEY"),
+        "headers": lambda: {
+            # "Authorization": f"Bearer {os.getenv('OPENAI_API_KEY')}",
+            "Content-Type": "application/json"
+        }
+    },
 }
 
 # ===============================
