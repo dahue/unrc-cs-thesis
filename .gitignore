@@ -12,7 +12,12 @@ __pycache__/
 *.txt
 *.csv
 *.pyc
+*.pkl
+*.sqlite
 
 
-# DON'T ignore requirements.txt
+# DON'T ignore:
 !requirements.txt
+!data/bronze/schema.sql
+!data/silver/schema.sql
+!data/gold/schema.sql
