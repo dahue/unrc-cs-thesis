@@ -4,11 +4,10 @@ import json
 import re
 from spider import evaluation, process_sql
 
-ROOT_PATH = "/Users/atissera/Developer/repos/unrc-cs-thesis"
-SPIDER_DB_PATH = f"{ROOT_PATH}/tmp/spider_data/database"
-BRONZE_DB = f"{ROOT_PATH}/data/bronze/bronze.sqlite"
-SILVER_DB = f"{ROOT_PATH}/data/silver/silver.sqlite"
-SCHEMA_FILE = f"{ROOT_PATH}/data/silver/schema.sql"
+SPIDER_DB_PATH = "/Users/atissera/Developer/repos/unrc-cs-thesis/tmp/spider_data/database"
+BRONZE_DB = "/Users/atissera/Developer/repos/unrc-cs-thesis/database/bronze/bronze.sqlite"
+SILVER_DB = "/Users/atissera/Developer/repos/unrc-cs-thesis/database/silver/silver.sqlite"
+SCHEMA_FILE = "/Users/atissera/Developer/repos/unrc-cs-thesis/database/silver/schema.sql"
 
 os.makedirs(os.path.dirname(SILVER_DB), exist_ok=True)
 
@@ -83,25 +82,25 @@ def get_schema_context(conn, db_id):
             col_type = column_types[idx]
             table_columns[table_names[table_idx]].append((col_name, col_type))
 
-    simplified_ddl = "\n".join(
+    simplified_ddl = [
         f"{table}({', '.join(col for col, _ in cols)})"
         for table, cols in table_columns.items()
-    )
+    ]
 
-    full_ddl = "\n\n".join(
+    full_ddl = [
         f"CREATE TABLE {table}({', '.join(f'{col} {typ}' for col, typ in cols)});"
         for table, cols in table_columns.items()
-    )
+    ]
 
-    fk_strings = []
+    fk_list = []
     for i, j in foreign_keys:
         src_table_idx, src_col = column_names[i]
         tgt_table_idx, tgt_col = column_names[j]
         src_table = table_names[src_table_idx]
         tgt_table = table_names[tgt_table_idx]
-        fk_strings.append(f"{src_table}({src_col}) REFERENCES {tgt_table}({tgt_col})")
+        fk_list.append(f"{src_table}({src_col}) REFERENCES {tgt_table}({tgt_col})")
 
-    return simplified_ddl, full_ddl, json.dumps(fk_strings)
+    return json.dumps(simplified_ddl), json.dumps(full_ddl), json.dumps(fk_list)
 
 # -- Process and insert --
 for id, db_id, source, question, query, query_toks_no_value, sql_json, natsql in rows:

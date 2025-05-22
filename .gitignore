@@ -1,6 +1,8 @@
 # Ignore the entire spider_date/ directory
 spider_data/
 spider/
+NatSQL/
+
 .ipynb_checkpoints/
 __pycache__/
 
@@ -8,6 +10,7 @@ __pycache__/
 .DS_Store
 .env
 *.json
+*.jsonl
 *.sql
 *.txt
 *.csv
