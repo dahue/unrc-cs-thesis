@@ -3,11 +3,16 @@ import sqlite3
 import json
 import re
 from spider import evaluation, process_sql
+from dotenv import load_dotenv
+load_dotenv()
 
-SPIDER_DB_PATH = "/Users/atissera/Developer/repos/unrc-cs-thesis/tmp/spider_data/database"
-BRONZE_DB = "/Users/atissera/Developer/repos/unrc-cs-thesis/database/bronze/bronze.sqlite"
-SILVER_DB = "/Users/atissera/Developer/repos/unrc-cs-thesis/database/silver/silver.sqlite"
-SCHEMA_FILE = "/Users/atissera/Developer/repos/unrc-cs-thesis/database/silver/schema.sql"
+ROOT_PATH = os.environ["ROOT_PATH"]
+TMP_DIR = os.environ["TMP_DIR"]
+
+SPIDER_DB_PATH = f"{TMP_DIR}/spider_data/database"
+BRONZE_DB = f"{ROOT_PATH}/database/bronze/bronze.sqlite"
+SILVER_DB = f"{ROOT_PATH}/database/silver/silver.sqlite"
+SCHEMA_FILE = f"{ROOT_PATH}/database/silver/schema.sql"
 
 os.makedirs(os.path.dirname(SILVER_DB), exist_ok=True)
 
@@ -140,4 +145,3 @@ for id, db_id, source, question, query, query_toks_no_value, sql_json, natsql in
 conn_silver.commit()
 conn_bronze.close()
 conn_silver.close()
-print("✅ Silver transformation complete.")

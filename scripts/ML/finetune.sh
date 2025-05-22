@@ -1,6 +1,13 @@
 #!/bin/bash
 
-export ROOT_PATH="/Users/atissera/Developer/repos/unrc-cs-thesis"
+# Load .env file into the current shell session
+set -o allexport
+source .env
+set +o allexport
+
+# Now use the variables
+echo "Project root is: $ROOT_PATH"
+
 export MODEL="mlx-community/Llama-3.2-3B-Instruct-4bit"
 
 mlx_lm.lora \

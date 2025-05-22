@@ -1,10 +1,27 @@
 #!/bin/bash
 
+# Load .env file into the current shell session
+set -o allexport
+source .env
+set +o allexport
+
+# Now use the variables
+echo "Project root is: $ROOT_PATH"
+
 # Exit on any error
 set -e
 
+# Set TMP_DIR to /tmp if it is not defined
+if [ -z "$TMP_DIR" ]; then
+    echo "TMP_DIR is not defined. Setting it to /tmp"
+    TMP_DIR="/tmp"
+    echo "TMP_DIR=$TMP_DIR" >> .env
+fi
+mkdir -p "$TMP_DIR"
+echo "Temporary directory is: $TMP_DIR"
+echo ""
+
 # Download Spider dataset
-TMP_DIR="tmp"
 SPIDER_DIR="$TMP_DIR/spider_data"
 ZIP_FILE="$TMP_DIR/spider_data.zip"
 NATSQL_DIR="$TMP_DIR/NatSQL"
@@ -27,6 +44,7 @@ else
   rm -rf "$TMP_DIR/__MACOSX"
   echo "✅ spider_data is ready."
 fi
+echo ""
 
 DB_TRAIN="$SPIDER_DIR/database"
 DB_TEST="$SPIDER_DIR/test_database"
@@ -44,7 +62,6 @@ else
             target="$DB_TRAIN/$db_name"
 
             if [ -e "$target" ]; then
-                echo "⚠️  Overwriting existing $db_name"
                 rm -rf "$target"
             fi
 
@@ -55,40 +72,45 @@ else
     fi
 fi
 echo "📁 All test databases moved into: $DB_TRAIN"
-
+echo ""
 
 # Download NatSQL repo
 if [ -d "$NATSQL_DIR" ]; then
   echo "✅ NatSQL repo already exists at $NATSQL_DIR. Skipping clone."
+  echo ""
 else
   echo "⬇️ Cloning NatSQL repo..."
   git clone https://github.com/dahue/NatSQL "$NATSQL_DIR"
   echo "✅ NatSQL repo cloned."
+  echo ""
 fi
 
 # Install Python dependencies
+echo "⬇️ Installing Python dependencies..."
 pip install -r requirements.txt
+echo "✅ Done."
+echo ""
 
 # Populate Bronze tables
 echo "🐍 Populate Bronze tables..."
-python3 scripts/pipeline/ingest_bronze.py
-echo "✅ Python script completed."
+python scripts/pipeline/ingest_bronze.py
+echo "✅ Done."
 echo ""
 
 # Transform Bronze to Silver tables
 echo "🐍 Transform Bronze to Silver tables..."
-python3 scripts/pipeline/bronze_to_silver.py
-echo "✅ Python script completed."
+python scripts/pipeline/bronze_to_silver.py
+echo "✅ Done."
 echo ""
 
 # Transform Silver to Gold tables
 echo "🐍 Transform Silver to Gold tables..."
-python3 scripts/pipeline/silver_to_gold.py
-echo "✅ Python script completed."
+python scripts/pipeline/silver_to_gold.py
+echo "✅ Done."
 echo ""
 
 # Export Files for Training
 echo "🐍 Generate Natural Language to SQL Training Data..."
-python3 scripts/ML/generate_nl2SQL_training_data.py
-echo "✅ Python script completed."
+python scripts/ML/generate_nl2SQL_training_data.py
+echo "✅ Done."
 echo ""

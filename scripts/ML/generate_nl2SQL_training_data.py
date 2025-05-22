@@ -2,9 +2,12 @@ import os
 import json
 import sqlite3
 import string
-import pandas as pd
+from dotenv import load_dotenv
+load_dotenv()
 
-ROOT_PATH = "/Users/atissera/Developer/repos/unrc-cs-thesis"
+ROOT_PATH = os.environ["ROOT_PATH"]
+TMP_DIR = os.environ["TMP_DIR"]
+
 GOLD_DB = f"{ROOT_PATH}/database/gold/gold.sqlite"
 MODEL_TYPE = 'nl2SQL'
 
@@ -17,7 +20,7 @@ def get_schema_ddl(entry):
 
 def get_cell_values_sample(entry, max_samples=3):
     db_id = entry["db_id"]
-    db_path = os.path.join(ROOT_PATH, 'tmp', 'spider_data', 'database', db_id, db_id + '.sqlite')
+    db_path = os.path.join(TMP_DIR, 'spider_data', 'database', db_id, db_id + '.sqlite')
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
@@ -114,6 +117,7 @@ test_data = create_dataset(test_entries, template, completion_column="query")
 
 # Write to JSONL files
 def write_jsonl(data, filename):
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
     with open(filename, 'w') as f:
         for item in data:
             f.write(json.dumps(item) + '\n')
@@ -123,14 +127,4 @@ write_jsonl(train_data, folder_prefix+'train.jsonl')
 write_jsonl(test_data, folder_prefix+'test.jsonl')
 write_jsonl(valid_data, folder_prefix+'valid.jsonl')
 
-print(f"Dataset split and saved: train ({len(train_data)}), test ({len(test_data)}), valid ({len(valid_data)})")
-
-# Verify file contents
-def count_lines(filename):
-    with open(folder_prefix+filename, 'r') as f:
-        return sum(1 for _ in f)
-
-print("\nVerifying file contents:")
-print(f"train.jsonl: {count_lines('train.jsonl')} lines")
-print(f"test.jsonl: {count_lines('test.jsonl')} lines")
-print(f"valid.jsonl: {count_lines('valid.jsonl')} lines")
+print(f"Dataset split and saved to {folder_prefix}: train ({len(train_data)} lines), test ({len(test_data)} lines), valid ({len(valid_data)} lines)")

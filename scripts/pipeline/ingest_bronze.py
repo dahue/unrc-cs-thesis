@@ -1,11 +1,14 @@
 import os
 import json
 import sqlite3
+from dotenv import load_dotenv
+load_dotenv()
 
-# Paths
-ROOT_PATH = "/Users/atissera/Developer/repos/unrc-cs-thesis"
-SPIDER_DIR = f"{ROOT_PATH}/tmp/spider_data"
-NATSQL_DIR = f"{ROOT_PATH}/tmp/NatSQL/NatSQLv1_6"
+ROOT_PATH = os.environ["ROOT_PATH"]
+TMP_DIR = os.environ["TMP_DIR"]
+
+SPIDER_DIR = f"{TMP_DIR}/spider_data"
+NATSQL_DIR = f"{TMP_DIR}/NatSQL/NatSQLv1_6"
 OUT_DB = f"{ROOT_PATH}/database/bronze/bronze.sqlite"
 SCHEMA_FILE = f"{ROOT_PATH}/database/bronze/schema.sql"
 os.makedirs(os.path.dirname(OUT_DB), exist_ok=True)
@@ -99,4 +102,3 @@ load_and_insert_table_schema(os.path.join(SPIDER_DIR, "test_tables.json"), "test
 
 conn.commit()
 conn.close()
-print("✅ Bronze ingestion complete using schema.sql")
