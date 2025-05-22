@@ -6,8 +6,8 @@ import sqlite3
 ROOT_PATH = "/Users/atissera/Developer/repos/unrc-cs-thesis"
 SPIDER_DIR = f"{ROOT_PATH}/tmp/spider_data"
 NATSQL_DIR = f"{ROOT_PATH}/tmp/NatSQL/NatSQLv1_6"
-OUT_DB = f"{ROOT_PATH}/data/bronze/bronze.sqlite"
-SCHEMA_FILE = f"{ROOT_PATH}/data/bronze/schema.sql"
+OUT_DB = f"{ROOT_PATH}/database/bronze/bronze.sqlite"
+SCHEMA_FILE = f"{ROOT_PATH}/database/bronze/schema.sql"
 os.makedirs(os.path.dirname(OUT_DB), exist_ok=True)
 
 def load_json(path):

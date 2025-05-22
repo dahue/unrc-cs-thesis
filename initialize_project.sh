@@ -71,17 +71,24 @@ pip install -r requirements.txt
 
 # Populate Bronze tables
 echo "🐍 Populate Bronze tables..."
-python3 scripts/ingest_bronze.py
+python3 scripts/pipeline/ingest_bronze.py
 echo "✅ Python script completed."
+echo ""
 
 # Transform Bronze to Silver tables
 echo "🐍 Transform Bronze to Silver tables..."
-python3 scripts/bronze_to_silver.py
+python3 scripts/pipeline/bronze_to_silver.py
 echo "✅ Python script completed."
+echo ""
 
 # Transform Silver to Gold tables
 echo "🐍 Transform Silver to Gold tables..."
-python3 scripts/silver_to_gold.py
+python3 scripts/pipeline/silver_to_gold.py
 echo "✅ Python script completed."
+echo ""
 
 # Export Files for Training
+echo "🐍 Generate Natural Language to SQL Training Data..."
+python3 scripts/ML/generate_nl2SQL_training_data.py
+echo "✅ Python script completed."
+echo ""
