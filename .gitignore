@@ -1,6 +1,8 @@
 # Ignore the entire spider_date/ directory
 spider_data/
 spider/
+NatSQL/
+
 .ipynb_checkpoints/
 __pycache__/
 
@@ -8,11 +10,17 @@ __pycache__/
 .DS_Store
 .env
 *.json
+*.jsonl
 *.sql
 *.txt
 *.csv
 *.pyc
+*.pkl
+*.sqlite
 
 
-# DON'T ignore requirements.txt
+# DON'T ignore:
 !requirements.txt
+!data/bronze/schema.sql
+!data/silver/schema.sql
+!data/gold/schema.sql
