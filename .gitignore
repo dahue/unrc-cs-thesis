@@ -21,6 +21,6 @@ __pycache__/
 
 # DON'T ignore:
 !requirements.txt
-!data/bronze/schema.sql
-!data/silver/schema.sql
-!data/gold/schema.sql
+!database/bronze/schema.sql
+!database/silver/schema.sql
+!database/gold/schema.sql
