@@ -22,6 +22,45 @@ We focus on using **open-source LLMs** that can run on modest hardware, providin
 - Query evaluation based on accuracy and recall
 - Experiments with lightweight, locally deployable models
 
+## 🛠️ Installation
+
+1. Install development tools:
+```bash
+xcode-select --install
+```
+
+2. Install miniforge:
+```bash
+brew install --cask miniforge
+conda init zsh
+source ~/.zshrc
+```
+
+3. Create a new conda environment:
+```bash
+conda create -n unrc-cs-thesis python=3.12.9
+conda activate unrc-cs-thesis
+```
+
+4. Clone this repo and navigate to it:
+```bash
+git clone https://github.com/dahue/unrc-cs-thesis.git && cd unrc-cs-thesis
+```
+
+5. Set the project root path in a .env file:
+```bash
+echo "ROOT_PATH=$(pwd)" > .env
+```
+or manually:
+```bash
+echo "ROOT_PATH=/absolute/path/to/unrc-cs-thesis" > .env
+```
+
+6. Run the initialization script:
+```bash
+sh init.sh
+```
+
 ## 📅 Timeline
 
 Development started in **November 2024** and is expected to conclude by **June 2025**.
