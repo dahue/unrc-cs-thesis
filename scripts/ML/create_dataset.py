@@ -101,9 +101,10 @@ test_rows = cursor_gold.fetchall()
 test_entries = [dict(zip(columns, row)) for row in test_rows]
 
 
+
 # Load Prompt Template
 # nl2SQL
-with open(os.path.join(ROOT_PATH, "data", "template", MODEL_TYPE, "prompt_template.md"), "r", encoding="utf-8") as f:
+with open(os.path.join(ROOT_PATH, "data", "template", MODEL_TYPE, "nl2SQL_prompt_template_10.md"), "r", encoding="utf-8") as f:
     template = f.read()
 
 formatter = string.Formatter()
