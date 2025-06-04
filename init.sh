@@ -49,6 +49,8 @@ echo ""
 DB_TRAIN="$SPIDER_DIR/database"
 DB_TEST="$SPIDER_DIR/test_database"
 
+DB_TRAIN_DIR="$ROOT_PATH/database/bronze/spider_databases"
+
 if [ ! -d "$DB_TEST" ]; then
     echo "⚠️  Folder '$DB_TEST' does not exist. Skipping move."
 else
@@ -69,6 +71,19 @@ else
             echo "✅ Moved $db_name"
         done
         rm -rf $DB_TEST
+
+        mkdir -p "$DB_TRAIN_DIR"
+        for db in "$DB_TRAIN"/*; do
+            db_name=$(basename "$db")
+            target="$DB_TRAIN_DIR/$db_name"
+
+            if [ -e "$target" ]; then
+                rm -rf "$target"
+            fi
+
+            cp -r "$db" "$target"
+            echo "✅ Copied $db_name"
+        done
     fi
 fi
 echo "📁 All test databases moved into: $DB_TRAIN"
@@ -111,6 +126,6 @@ echo ""
 
 # Export Files for Training
 echo "🐍 Generate Natural Language to SQL Training Data..."
-python scripts/ML/generate_nl2SQL_training_data.py
+python scripts/ML/create_dataset.py
 echo "✅ Done."
 echo ""

@@ -1,7 +1,5 @@
 # Ignore the entire spider_date/ directory
-spider_data/
-spider/
-NatSQL/
+database/bronze/spider_databases/
 
 .ipynb_checkpoints/
 __pycache__/
