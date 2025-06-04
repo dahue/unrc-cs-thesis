@@ -9,14 +9,18 @@ __pycache__/
 .env
 *.json
 *.jsonl
+*.jsonl
 *.sql
 *.txt
 *.csv
 *.pyc
 *.pkl
 *.sqlite
+*.pkl
+*.sqlite
 
 
+# DON'T ignore:
 # DON'T ignore:
 !requirements.txt
 !database/bronze/schema.sql
