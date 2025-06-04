@@ -1,9 +1,10 @@
 import os
 import sqlite3
-import json
-import re
+from dotenv import load_dotenv
+load_dotenv()
 
-ROOT_PATH = "/Users/atissera/Developer/repos/unrc-cs-thesis"
+ROOT_PATH = os.environ["ROOT_PATH"]
+
 SILVER_DB = f"{ROOT_PATH}/database/silver/silver.sqlite"
 GOLD_DB = f"{ROOT_PATH}/database/gold/gold.sqlite"
 SCHEMA_FILE = f"{ROOT_PATH}/database/gold/schema.sql"
@@ -57,4 +58,3 @@ for id, db_id, source, question, query, is_valid, notes, simplified_ddl, full_dd
 
 conn_gold.commit()
 conn_gold.close()
-print("✅ Gold transformation complete.")
