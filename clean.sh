@@ -20,5 +20,7 @@ rm -rf "$ROOT_PATH/database/silver/silver.sqlite"
 rm -rf "$ROOT_PATH/database/gold/gold.sqlite"
 rm -rf "$ROOT_PATH/database/spider"
 
-rm -rf "$ROOT_PATH/data/training/nl2SQL/"
-rm -rf "$ROOT_PATH/data/training/nl2NatSQL/"
+rm -rf "$ROOT_PATH/data/training"
+rm -rf "$ROOT_PATH/data/predictions"
+rm -rf "$ROOT_PATH/data/benchmark"
+

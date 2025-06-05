@@ -66,7 +66,7 @@ if __name__ == "__main__":
                        help='Input file for gold queries. MUST be a sql file')
     parser.add_argument('--predict-file', type=str, required=True,
                        help='Input file for predicted queries. MUST be a sql file')
-    parser.add_argument('--output-file', type=str, required=False, default=f"{ROOT_PATH}/data/benchmark/benchmark.txt",
+    parser.add_argument('--output-file', type=str, required=False, default=f"{ROOT_PATH}/data/benchmark/eval_results.txt",
                        help='Output file for results')
     args = parser.parse_args()
     main(args.gold_file, args.predict_file, args.output_file)

@@ -61,6 +61,32 @@ echo "ROOT_PATH=/absolute/path/to/unrc-cs-thesis" > .env
 sh init.sh
 ```
 
+## 📚 Usage
+
+### Training set creation
+
+```bash
+python scripts/ML/create_training_set.py
+```
+
+### LLM Fine-tuning
+
+```bash
+python scripts/ML/finetune.py
+```
+
+### Prediction
+
+```bash
+python scripts/ML/predict.py
+```
+
+### Benchmarking
+
+```bash
+python scripts/ML/benchmark.py
+```
+
 ## 📅 Timeline
 
 Development started in **November 2024** and is expected to conclude by **June 2025**.
