@@ -2,23 +2,29 @@ import os
 import subprocess
 from dotenv import load_dotenv
 
-def main():
+def main(model, model_type):
+    """
+    Fine-tune either nl2SQL or nl2NatSQL models on a specified dataset.
+    
+    Args:
+        model (str): Model to fine-tune
+        model_type (str): Either 'nl2SQL' or 'nl2NatSQL'
+    """
+    if model_type not in ['nl2SQL', 'nl2NatSQL']:
+        raise ValueError("model_type must be either 'nl2SQL' or 'nl2NatSQL'")
+
     # Load environment variables
     load_dotenv()
     ROOT_PATH = os.environ.get("ROOT_PATH")
     if not ROOT_PATH:
         raise ValueError("ROOT_PATH environment variable not set. Please set it in your .env file.")
 
-    # Set environment variable
-    os.environ["MODEL"] = "mlx-community/Llama-3.2-3B-Instruct-4bit"
-
-    # Define the command
     cmd = [
         "mlx_lm.lora",
-        "--model", os.environ["MODEL"],
+        "--model", model,
         "--train",
         "--data", f"{ROOT_PATH}/data/training/nl2SQL",
-        "--adapter-path", f"{ROOT_PATH}/experiments/models/Llama-3.2-3B-Instruct-4bit/nl2SQL/adapters",
+        "--adapter-path", f"{ROOT_PATH}/data/adapters/nl2SQL/{model.strip('mlx-community/')}",
         "--iters", "50",
         "--max-seq-length", "8192", # default 2048
         "--batch-size", "2",
@@ -34,4 +40,11 @@ def main():
         raise
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description='Fine-tune nl2SQL or nl2NatSQL models')
+    parser.add_argument('--model', type=str, required=True,
+                       help='Model to fine-tune', choices=['mlx-community/Llama-3.2-3B-Instruct-4bit', 'mlx-community/Llama-3.2-1B-Instruct-4bit'])
+    parser.add_argument('--model-type', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
+                       help='Type of model to fine-tune')
+    args = parser.parse_args()
+    main(args.model, args.model_type)

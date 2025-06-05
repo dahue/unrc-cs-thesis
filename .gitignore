@@ -1,6 +1,5 @@
-# Ignore the entire spider_date/ directory
-database/bronze/spider_databases/
-
+# Ignore folders
+database/spider/
 .ipynb_checkpoints/
 __pycache__/
 
@@ -9,18 +8,13 @@ __pycache__/
 .env
 *.json
 *.jsonl
-*.jsonl
 *.sql
 *.txt
 *.csv
 *.pyc
 *.pkl
 *.sqlite
-*.pkl
-*.sqlite
 
-
-# DON'T ignore:
 # DON'T ignore:
 !requirements.txt
 !database/bronze/schema.sql

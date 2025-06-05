@@ -9,7 +9,7 @@ load_dotenv()
 ROOT_PATH = os.environ["ROOT_PATH"]
 TMP_DIR = os.environ["TMP_DIR"]
 
-SPIDER_DB_PATH = f"{TMP_DIR}/spider_data/database"
+SPIDER_DB_PATH = f"{ROOT_PATH}/database/spider"
 BRONZE_DB = f"{ROOT_PATH}/database/bronze/bronze.sqlite"
 SILVER_DB = f"{ROOT_PATH}/database/silver/silver.sqlite"
 SCHEMA_FILE = f"{ROOT_PATH}/database/silver/schema.sql"

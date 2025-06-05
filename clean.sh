@@ -16,9 +16,9 @@ rm -rf "$TMP_DIR/spider_data.zip"
 rm -rf "$TMP_DIR/NatSQL"
 
 rm -rf "$ROOT_PATH/database/bronze/bronze.sqlite"
-rm -rf "$ROOT_PATH/database/bronze/spider_databases"
 rm -rf "$ROOT_PATH/database/silver/silver.sqlite"
 rm -rf "$ROOT_PATH/database/gold/gold.sqlite"
+rm -rf "$ROOT_PATH/database/spider"
 
 rm -rf "$ROOT_PATH/data/training/nl2SQL/"
 rm -rf "$ROOT_PATH/data/training/nl2NatSQL/"
