@@ -1,5 +1,6 @@
 # Ignore folders
 database/spider/
+data/adapters/
 .ipynb_checkpoints/
 __pycache__/
 

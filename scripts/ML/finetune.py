@@ -23,12 +23,12 @@ def main(model, model_type):
         "mlx_lm.lora",
         "--model", model,
         "--train",
-        "--data", f"{ROOT_PATH}/data/training/nl2SQL",
-        "--adapter-path", f"{ROOT_PATH}/data/adapters/nl2SQL/{model.strip('mlx-community/')}",
-        "--iters", "50",
-        "--max-seq-length", "8192", # default 2048
+        "--data", f"{ROOT_PATH}/data/training/{model_type}/template_11",
+        "--adapter-path", f"{ROOT_PATH}/data/adapters/{model_type}/{model.strip('mlx-community/')}",
+        "--iters", "100",
+        "--max-seq-length", "2048", # default 2048
         "--batch-size", "2",
-        "--num-layers", "16"
+        "--num-layers", "8"
     ]
 
     try:

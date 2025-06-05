@@ -1,6 +1,7 @@
 import os
 import json
 import time
+from pathlib import Path
 from typing import List, Dict, Any
 from mlx_lm import load, generate
 from dotenv import load_dotenv
@@ -73,6 +74,9 @@ def process_batch(
     return results
 
 def save_results(results: List[Dict[str, Any]], output_file: str = "pred.sql"):
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
     with open(output_file, "w", encoding="utf-8") as f:
         for query in results:
             f.write(query['response'] + "\n")
