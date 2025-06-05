@@ -117,9 +117,3 @@ echo "🐍 Transform Silver to Gold tables..."
 python scripts/pipeline/silver_to_gold.py
 echo "✅ Done."
 echo ""
-
-# Export Files for Training
-echo "🐍 Generate Natural Language to SQL Training Data..."
-python scripts/ML/create_dataset.py
-echo "✅ Done."
-echo ""
