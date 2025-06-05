@@ -4,6 +4,7 @@ import sqlite3
 import json
 import tempfile
 import spider.evaluation as sp
+from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -53,6 +54,9 @@ def main(gold_file, predict_file, output_file):
     PREDICT = predict_file
     ETYPE = "all" # all, easy, medium, hard
 
+    output_path = Path(output_file)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
     with open(output_file, 'w') as f:
         original_stdout = sys.stdout
         sys.stdout = f
