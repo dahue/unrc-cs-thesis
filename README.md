@@ -66,25 +66,25 @@ sh init.sh
 ### Training set creation
 
 ```bash
-python scripts/ML/create_training_set.py
+python scripts/ML/create_training_set.py --model-type nl2SQL --template-name template_11.j2
 ```
 
 ### LLM Fine-tuning
 
 ```bash
-python scripts/ML/finetune.py
+python scripts/ML/finetune.py --model mlx-community/Llama-3.2-3B-Instruct-4bit --model-type nl2SQL
 ```
 
 ### Prediction
 
 ```bash
-python scripts/ML/predict.py
+python scripts/ML/predict.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --adapter data/adapters/nl2SQL/Llama-3.2-1B-Instruct-4b/ --input-file data/training/nl2SQL/template_11/t_valid.jsonl
 ```
 
 ### Benchmarking
 
 ```bash
-python scripts/ML/benchmark.py
+python scripts/ML/benchmark.py --gold-file data/training/nl2SQL/template_11/t_valid.sql --predict-file data/predictions/pred.sql
 ```
 
 ## 📅 Timeline

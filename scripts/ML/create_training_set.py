@@ -142,9 +142,9 @@ def main(model_type, template_name):
     valid_data = create_dataset(valid_entries, template, model_type=model_type)
     test_data = create_dataset(test_entries, template, model_type=model_type)
 
-    train_data = create_sql_dataset(train_entries)
-    valid_data = create_sql_dataset(valid_entries)
-    test_data = create_sql_dataset(test_entries)
+    train_sql_data = create_sql_dataset(train_entries)
+    valid_sql_data = create_sql_dataset(valid_entries)
+    test_sql_data = create_sql_dataset(test_entries)
 
     # Write to JSONL files
     def write_jsonl(data, filename):
@@ -164,9 +164,9 @@ def main(model_type, template_name):
     write_jsonl(test_data, folder_prefix+'test.jsonl')
     write_jsonl(valid_data, folder_prefix+'valid.jsonl')
 
-    write_sql(train_data, folder_prefix+'train.sql')
-    write_sql(test_data, folder_prefix+'test.sql')
-    write_sql(valid_data, folder_prefix+'valid.sql')
+    write_sql(train_sql_data, folder_prefix+'train.sql')
+    write_sql(test_sql_data, folder_prefix+'test.sql')
+    write_sql(valid_sql_data, folder_prefix+'valid.sql')
 
     # Close database connection
     conn_gold.close()
