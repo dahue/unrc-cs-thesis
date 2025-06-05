@@ -26,21 +26,16 @@ SPIDER_DIR="$TMP_DIR/spider_data"
 ZIP_FILE="$TMP_DIR/spider_data.zip"
 NATSQL_DIR="$TMP_DIR/NatSQL"
 
-if [ -d "$SPIDER_DIR" ]; then
-  echo "✅ spider_data already exists at $SPIDER_DIR. Skipping download and extraction."
-elif [ -f "$ZIP_FILE" ]; then
+if [ -f "$ZIP_FILE" ]; then
   echo "📦 Found existing spider_data.zip. Extracting..."
   unzip "$ZIP_FILE" -d $TMP_DIR/
-  echo "🗑️ Removing zip file..."
-  rm "$ZIP_FILE"
+  rm -rf "$TMP_DIR/__MACOSX"
   echo "✅ spider_data is ready."
 else
   echo "⬇️ Downloading spider_data.zip..."
   wget -O "$ZIP_FILE" "https://drive.usercontent.google.com/download?id=1403EGqzIDoHMdQF4c9Bkyl7dZLZ5Wt6J&export=download&authuser=0&confirm=t&uuid=c519429f-e190-4024-9db5-5500dd9f73de&at=ALoNOgmVI-vAWDoXBUn2D2Ezy8Fy:1747082984773"
   echo "📦 Extracting spider_data.zip..."
   unzip "$ZIP_FILE" -d $TMP_DIR/
-  echo "🗑️ Removing zip file..."
-  rm "$ZIP_FILE"
   rm -rf "$TMP_DIR/__MACOSX"
   echo "✅ spider_data is ready."
 fi
@@ -49,10 +44,10 @@ echo ""
 DB_TRAIN="$SPIDER_DIR/database"
 DB_TEST="$SPIDER_DIR/test_database"
 
-DB_TRAIN_DIR="$ROOT_PATH/database/bronze/spider_databases"
+DB_TRAIN_DIR="$ROOT_PATH/database/spider"
 
 if [ ! -d "$DB_TEST" ]; then
-    echo "⚠️  Folder '$DB_TEST' does not exist. Skipping move."
+    echo "⚠️  Folder '$DB_TEST' does not exist. Moving."
 else
     # Check if it's empty
     if [ -z "$(ls -A "$DB_TEST")" ]; then
@@ -92,13 +87,12 @@ echo ""
 # Download NatSQL repo
 if [ -d "$NATSQL_DIR" ]; then
   echo "✅ NatSQL repo already exists at $NATSQL_DIR. Skipping clone."
-  echo ""
 else
   echo "⬇️ Cloning NatSQL repo..."
   git clone https://github.com/dahue/NatSQL "$NATSQL_DIR"
   echo "✅ NatSQL repo cloned."
-  echo ""
 fi
+echo ""
 
 # Install Python dependencies
 echo "⬇️ Installing Python dependencies..."
