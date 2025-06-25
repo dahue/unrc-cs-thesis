@@ -100,6 +100,7 @@ Thesis Director: **Dr. Pablo Ponzio**
 
 - [**Spider: A Large-Scale Human-Labeled Dataset for Complex and Cross-Domain Semantic Parsing and Text-to-SQL Task**](https://github.com/taoyds/spider)
 - [**Text-To-SQL on spider**](https://paperswithcode.com/sota/text-to-sql-on-spider)
+- [**MLX-LM: Large Language Models for MLX**](https://github.com/ml-explore/mlx-lm)
 
 - [**Text-to-SQL Empowered by Large Language Models: A Benchmark Evaluation**](https://arxiv.org/pdf/2308.15363)
 - [**PET-SQL: A Prompt-Enhanced Two-Round Refinement of Text-to-SQL with Cross-consistency**](https://arxiv.org/pdf/2403.09732)
