@@ -44,8 +44,15 @@ def process_batch(
         
         try:
             # Generate response
-            response = generate(model, tokenizer, prompt=prompt, max_tokens=max_tokens, verbose=False)
+            messages = [{"role": "user", "content": prompt}]
+            message = tokenizer.apply_chat_template(
+                messages, add_generation_prompt=True
+            )
             
+            response = normalize_response(
+                generate(model, tokenizer, prompt=message, max_tokens=max_tokens, verbose=False)
+            )
+
             end_time = time.time()
             
             result = {
@@ -72,6 +79,19 @@ def process_batch(
         print("-" * 50)
     
     return results
+
+def normalize_response(text: str) -> str:
+    """
+    Normalize the LLM response to fit in a single line.
+    Removes excessive whitespace, newlines, and tabs.
+
+    Args:
+        text (str): The raw response string from the LLM.
+
+    Returns:
+        str: A normalized, single-line string.
+    """
+    return " ".join(text.split())
 
 def save_results(results: List[Dict[str, Any]], output_file: str = "pred.sql"):
     output_path = Path(output_file)
@@ -100,21 +120,31 @@ def load_prompts_from_file(file_path: str) -> List[str]:
                 print(f"Warning: Invalid JSON on line {line_num}, skipping: {e}")
     return prompts
 
-def main(model, adapter, input_file, output_file):
+def main(model_name, strategy, template, use_adapter, input_file):
     """
     Fine-tune either nl2SQL or nl2NatSQL models on a specified dataset.
     
     Args:
-        model (str): Model to fine-tune
+        model_name (str): Model to fine-tune
     """
     MAX_TOKENS = 512
-    
-    prompts = load_prompts_from_file(input_file)
+
+    template_folder = template.removesuffix('.j2')
+    input_file = input_file.removesuffix('.jsonl')
+    data = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{input_file+'.jsonl'}"
+
+    prompts = load_prompts_from_file(data)
     
     print(f"Starting batch inference with {len(prompts)} prompts")
     print("=" * 60)
-    
-    model, tokenizer = load_model(model, adapter)
+
+    finetuned = ''
+    if use_adapter:
+        finetuned = 'finetuned'
+        adapter = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}"
+        model, tokenizer = load_model(model_name, adapter)
+    else:
+        model, tokenizer = load_model(model_name)
     
     results = process_batch(
         prompts=prompts,
@@ -123,6 +153,7 @@ def main(model, adapter, input_file, output_file):
         max_tokens=MAX_TOKENS
     )
     
+    output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file+'_predictions_'+finetuned+'.sql'}"
     save_results(results, output_file)
     
     successful = sum(1 for r in results if r['status'] == 'success')
@@ -142,12 +173,22 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Batch inference using nl2SQL or nl2NatSQL models')
     parser.add_argument('--model', type=str, required=True,
-                       help='Model to fine-tune', choices=['mlx-community/Llama-3.2-3B-Instruct-4bit', 'mlx-community/Llama-3.2-1B-Instruct-4bit'])
-    parser.add_argument('--adapter', type=str, required=False,
-                       help='Adapter to use for inference')
+                       help='Model to fine-tune', choices=[
+                            'mlx-community/Llama-3.2-1B-Instruct-4bit',     # 1B
+                            'mlx-community/Llama-3.2-3B-Instruct-4bit',     # 3B
+                            'mlx-community/Phi-4-mini-reasoning-4bit',      # 3.8B
+                            'mlx-community/Ministral-8B-Instruct-2410-4bit',# 8B
+                            'mlx-community/phi-4-4bit',                     # 14B
+                            'mlx-community/Qwen3-14B-4bit',                 # 14B
+                            'mlx-community/Phi-4-reasoning-plus-4bit'       # 14B
+                        ])
+    parser.add_argument('--strategy', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
+                       help='Strategy used to fine-tune')
+    parser.add_argument('--template', type=str, default='template_12',
+                       help='Template name to use for training data (default: template_12)')
+    parser.add_argument('--use-adapter', action='store_true', default=False,
+                        help='Use adapter for inference (default: False)')
     parser.add_argument('--input-file', type=str, required=True,
                        help='Input file for prompts. MUST be a jsonl file')
-    parser.add_argument('--output-file', type=str, required=False, default=f"{PRED_PATH}/pred.sql",
-                       help='Output file for results')
     args = parser.parse_args()
-    main(args.model, args.adapter, args.input_file, args.output_file)
+    main(args.model, args.strategy, args.template, args.use_adapter, args.input_file)
