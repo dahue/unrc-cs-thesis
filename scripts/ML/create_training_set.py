@@ -86,8 +86,8 @@ def create_completions(entries, query_type="sql"):
         completions.append(entry["query"] if query_type == "sql" else entry[query_type])
     return completions
 
-def create_dataset(entries, template, model_type):
-    query_type = "sql" if model_type == "nl2SQL" else "natsql"
+def create_dataset(entries, template, strategy):
+    query_type = "sql" if strategy == "nl2SQL" else "natsql"
     processed_data = []
     prompts = create_prompts(entries, template, query_type)
     completions = create_completions(entries, query_type)
@@ -101,16 +101,16 @@ def create_sql_dataset(entries):
         processed_data.append(f'{entry["query"]}\t{entry["db_id"]}')
     return processed_data
 
-def main(model_type, template_name):
+def main(strategy, template_name):
     """
     Create dataset for either nl2SQL or nl2NatSQL models using specified template.
     
     Args:
-        model_type (str): Either 'nl2SQL' or 'nl2NatSQL'
-        template_name (str): Template name (e.g., 'template_00.j2')
+        strategy (str): Either 'nl2SQL' or 'nl2NatSQL'
+        template_name (str): Template name (e.g., 'template_00' or 'template_00.j2')
     """
-    if model_type not in ['nl2SQL', 'nl2NatSQL']:
-        raise ValueError("model_type must be either 'nl2SQL' or 'nl2NatSQL'")
+    if strategy not in ['nl2SQL', 'nl2NatSQL']:
+        raise ValueError("strategy must be either 'nl2SQL' or 'nl2NatSQL'")
 
     # Connect to gold database
     conn_gold = sqlite3.connect(GOLD_DB)
@@ -133,14 +133,17 @@ def main(model_type, template_name):
     test_rows = cursor_gold.fetchall()
     test_entries = [dict(zip(columns, row)) for row in test_rows]
 
+    # Ensure template name has .j2 extension for loading
+    template_file = template_name if template_name.endswith('.j2') else f"{template_name}.j2"
+    
     # Load template
-    env = Environment(loader=FileSystemLoader(f'{ROOT_PATH}/data/templates/{model_type}'))
-    template = env.get_template(template_name)
+    env = Environment(loader=FileSystemLoader(f'{ROOT_PATH}/data/templates/{strategy}'))
+    template = env.get_template(template_file)
 
     # Create datasets
-    train_data = create_dataset(train_entries, template, model_type=model_type)
-    valid_data = create_dataset(valid_entries, template, model_type=model_type)
-    test_data = create_dataset(test_entries, template, model_type=model_type)
+    train_data = create_dataset(train_entries, template, strategy=strategy)
+    valid_data = create_dataset(valid_entries, template, strategy=strategy)
+    test_data = create_dataset(test_entries, template, strategy=strategy)
 
     train_sql_data = create_sql_dataset(train_entries)
     valid_sql_data = create_sql_dataset(valid_entries)
@@ -159,7 +162,7 @@ def main(model_type, template_name):
             for query in data:
                 f.write(query + "\n")
 
-    folder_prefix = f"{ROOT_PATH}/data/training/{model_type}/{template_name.strip('.j2')}/"
+    folder_prefix = f"{ROOT_PATH}/data/training/{strategy}/{template_name.removesuffix('.j2')}/"
     write_jsonl(train_data, folder_prefix+'train.jsonl')
     write_jsonl(test_data, folder_prefix+'test.jsonl')
     write_jsonl(valid_data, folder_prefix+'valid.jsonl')
@@ -176,9 +179,9 @@ def main(model_type, template_name):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Create dataset for nl2SQL or nl2NatSQL')
-    parser.add_argument('--model-type', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
+    parser.add_argument('--strategy', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
                        help='Type of model to create dataset for')
-    parser.add_argument('--template-name', type=str, required=True,
-                       help='Name of the template file')
+    parser.add_argument('--template', type=str, required=True,
+                       help='Name of the template file without')
     args = parser.parse_args()
-    main(args.model_type, args.template_name)
+    main(args.strategy, args.template)

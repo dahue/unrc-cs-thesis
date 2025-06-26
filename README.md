@@ -66,25 +66,25 @@ sh init.sh
 ### Training set creation
 
 ```bash
-python scripts/ML/create_training_set.py --model-type nl2SQL --template-name template_11.j2
+python scripts/ML/create_training_set.py --strategy nl2SQL --template template_13
 ```
 
 ### LLM Fine-tuning
 
 ```bash
-python scripts/ML/finetune.py --model mlx-community/Llama-3.2-3B-Instruct-4bit --model-type nl2SQL
+python scripts/ML/finetune.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --strategy nl2SQL --template template_13
 ```
 
 ### Prediction
-
+The flag `--use-adapter` is optional and only required when using the adapter learnt in the finetuning stage.
 ```bash
-python scripts/ML/predict.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --adapter data/adapters/nl2SQL/Llama-3.2-1B-Instruct-4b/ --input-file data/training/nl2SQL/template_11/t_valid.jsonl
+python scripts/ML/predict.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --strategy nl2SQL --template template_13 --input-file t_test --use-adapter
 ```
 
 ### Benchmarking
 
 ```bash
-python scripts/ML/benchmark.py --gold-file data/training/nl2SQL/template_11/t_valid.sql --predict-file data/predictions/pred.sql
+python scripts/ML/benchmark.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --strategy nl2SQL --template template_13 --prediction-file test_predictions_finetuned
 ```
 
 ## 📅 Timeline
@@ -100,6 +100,7 @@ Thesis Director: **Dr. Pablo Ponzio**
 
 - [**Spider: A Large-Scale Human-Labeled Dataset for Complex and Cross-Domain Semantic Parsing and Text-to-SQL Task**](https://github.com/taoyds/spider)
 - [**Text-To-SQL on spider**](https://paperswithcode.com/sota/text-to-sql-on-spider)
+- [**MLX-LM: Large Language Models for MLX**](https://github.com/ml-explore/mlx-lm)
 
 - [**Text-to-SQL Empowered by Large Language Models: A Benchmark Evaluation**](https://arxiv.org/pdf/2308.15363)
 - [**PET-SQL: A Prompt-Enhanced Two-Round Refinement of Text-to-SQL with Cross-consistency**](https://arxiv.org/pdf/2403.09732)

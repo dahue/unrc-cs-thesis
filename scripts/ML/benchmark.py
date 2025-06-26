@@ -14,7 +14,7 @@ if not ROOT_PATH:
     raise ValueError("ROOT_PATH environment variable not set. Please set it in your .env file.")
 
 
-def main(gold_file, predict_file, output_file):
+def main(model, strategy, template, predict_file):
     BRONZE_DB = f"{ROOT_PATH}/database/bronze/bronze.sqlite"
 
     conn_bronze = sqlite3.connect(BRONZE_DB)
@@ -27,6 +27,8 @@ def main(gold_file, predict_file, output_file):
     json_fields = ['table_names', 'table_names_original', 'column_names', 
                 'column_names_original', 'column_types', 'primary_keys', 'foreign_keys']
 
+    template_folder = template.removesuffix('.j2')
+    
     json_data = []
     for row in rows:
         row_dict = dict(row)
@@ -49,10 +51,14 @@ def main(gold_file, predict_file, output_file):
     KMAPS = sp.build_foreign_key_map_from_json(temp_file_path)
     os.unlink(temp_file_path)
 
+    predict_file = predict_file.removesuffix('.sql')
+    gold_file, finetuned = predict_file.split('_predictions_')
     DB_DIR = f"{ROOT_PATH}/database/spider"
-    GOLD = gold_file
-    PREDICT = predict_file
+    GOLD = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{gold_file+'.sql'}"
+    PREDICT = f"{ROOT_PATH}/data/predictions/{strategy}/{template_folder}/{model.removeprefix('mlx-community/')}/{predict_file+'.sql'}"
     ETYPE = "all" # all, easy, medium, hard
+
+    output_file=f"{ROOT_PATH}/data/benchmark/{strategy}/{template_folder}/{model.removeprefix('mlx-community/')}/{gold_file+'_benchmark_'+finetuned+'.txt'}"
 
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -66,11 +72,13 @@ def main(gold_file, predict_file, output_file):
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Benchmark nl2SQL or nl2NatSQL models')
-    parser.add_argument('--gold-file', type=str, required=True,
-                       help='Input file for gold queries. MUST be a sql file')
-    parser.add_argument('--predict-file', type=str, required=True,
+    parser.add_argument('--model', type=str, required=True,
+                       help='Model to fine-tune')
+    parser.add_argument('--strategy', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
+                       help='Type of model to create dataset for')
+    parser.add_argument('--template', type=str, required=True,
+                       help='Name of the template file without')
+    parser.add_argument('--prediction-file', type=str, required=True,
                        help='Input file for predicted queries. MUST be a sql file')
-    parser.add_argument('--output-file', type=str, required=False, default=f"{ROOT_PATH}/data/benchmark/eval_results.txt",
-                       help='Output file for results')
     args = parser.parse_args()
-    main(args.gold_file, args.predict_file, args.output_file)
+    main(args.model, args.strategy, args.template, args.prediction_file)
