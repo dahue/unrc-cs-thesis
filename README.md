@@ -64,9 +64,11 @@ sh init.sh
 ## 📚 Usage
 
 ### Training set creation
+`--difficulty` is optional. It creates a dataset with a specific dificulty (easy, medium, hard, extra)
+`--test-limit` is optional. It limits the amount of records in test file. It could be useeful for testing over a smaller dataset
 
 ```bash
-python scripts/ML/create_training_set.py --strategy nl2SQL --template template_13
+python scripts/ML/create_training_set.py --strategy nl2SQL --template template_13 --difficulty easy --test-limit 10
 ```
 
 ### LLM Fine-tuning
@@ -76,10 +78,13 @@ python scripts/ML/finetune.py --model mlx-community/Llama-3.2-1B-Instruct-4bit -
 ```
 
 ### Prediction
-The flag `--use-adapter` is optional and only required when using the adapter learnt in the finetuning stage.
+`--use-adapter` is optional and only required when using the adapter learnt in the finetuning stage.
+`--batch-size` is optional.
 ```bash
-python scripts/ML/predict.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --strategy nl2SQL --template template_13 --input-file t_test --use-adapter
+python scripts/ML/predict.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --strategy nl2SQL --template template_13 --input-file test --use-adapter --batch-size 5
 ```
+
+
 
 ### Benchmarking
 
@@ -109,3 +114,4 @@ Thesis Director: **Dr. Pablo Ponzio**
 - [**High Precision Natural Language Interfaces to Databases: a Graph Theoretic Approach**](https://aiweb.cs.washington.edu/research/projects/ai2/nli/aaai_submission.pdf)
 - [**Towards a Theory of Natural Language Interfaces to Databases**](https://turing.cs.washington.edu/papers/nli-iui03.pdf)
 - [**RESDSQL: Decoupling Schema Linking and Skeleton Parsing for Text-to-SQL**](https://arxiv.org/pdf/2302.05965v3)
+- [**The Illusion of Thinking**](https://ml-site.cdn-apple.com/papers/the-illusion-of-thinking.pdf)

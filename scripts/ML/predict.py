@@ -3,7 +3,7 @@ import json
 import time
 from pathlib import Path
 from typing import List, Dict, Any
-from mlx_lm import load, generate
+from mlx_lm import load, generate, batch_generate
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -32,53 +32,107 @@ def process_batch(
     prompts: List[str], 
     model, 
     tokenizer,
-    max_tokens: int = 512
+    max_tokens: int = 512,
+    batch_size: int = None
 ) -> List[Dict[str, Any]]:
-    """Process a batch of prompts and return results"""
-    results = []
+    """
+    Process a batch of prompts using MLX batch_generate for improved efficiency.
+    Maintains the same interface and output format as the original function.
     
-    for i, prompt in enumerate(prompts):
-        print(f"Processing prompt {i+1}/{len(prompts)}")
+    Args:
+        prompts: List of prompt strings to process
+        model: Loaded MLX model
+        tokenizer: Loaded MLX tokenizer
+        max_tokens: Maximum tokens to generate per prompt
+        batch_size: Maximum number of prompts to process in a single batch.
+                   If None, processes all prompts at once. Use smaller values
+                   to avoid memory issues.
         
-        start_time = time.time()
+    Returns:
+        List of dictionaries containing results for each prompt
+    """
+    # Set default batch size if not specified
+    if batch_size is None:
+        batch_size = len(prompts)
+    
+    print(f"Processing {len(prompts)} prompts using MLX batch_generate (batch_size={batch_size})")
+    
+    start_time = time.time()
+    all_results = []
+    
+    # Process prompts in chunks
+    for chunk_start in range(0, len(prompts), batch_size):
+        chunk_end = min(chunk_start + batch_size, len(prompts))
+        chunk_prompts = prompts[chunk_start:chunk_end]
+        
+        print(f"Processing chunk {chunk_start//batch_size + 1}/{(len(prompts) + batch_size - 1)//batch_size} "
+              f"(prompts {chunk_start+1}-{chunk_end})")
         
         try:
-            # Generate response
-            messages = [{"role": "user", "content": prompt}]
-            message = tokenizer.apply_chat_template(
-                messages, add_generation_prompt=True
+            # Apply chat template to prompts in this chunk
+            formatted_prompts = [
+                tokenizer.apply_chat_template(
+                    [{"role": "user", "content": prompt}],
+                    add_generation_prompt=True,
+                    enable_thinking=False
+                )
+                for prompt in chunk_prompts
+            ]
+            
+            # Use batch_generate for efficient processing of this chunk
+            batch_result = batch_generate(
+                model, 
+                tokenizer, 
+                formatted_prompts, 
+                verbose=False, 
+                max_tokens=max_tokens
             )
             
-            response = normalize_response(
-                generate(model, tokenizer, prompt=message, max_tokens=max_tokens, verbose=False)
-            )
-
-            end_time = time.time()
+            # Process results for this chunk
+            chunk_results = []
+            for i, (prompt, response_text) in enumerate(zip(chunk_prompts, batch_result.texts)):
+                # Normalize the response using the existing function
+                normalized_response = normalize_response(response_text)
+                
+                result = {
+                    "prompt_index": chunk_start + i,  # Global index
+                    "prompt": prompt,
+                    "response": normalized_response,
+                    "generation_time": 0,  # Will be calculated below
+                    "status": "success"
+                }
+                chunk_results.append(result)
             
-            result = {
-                "prompt_index": i,
-                "prompt": prompt,
-                "response": response,
-                "generation_time": end_time - start_time,
-                "status": "success"
-            }
+            all_results.extend(chunk_results)
+            print(f"Chunk completed successfully")
             
         except Exception as e:
-            result = {
-                "prompt_index": i,
-                "prompt": prompt,
-                "response": None,
-                "generation_time": 0,
-                "status": "error",
-                "error": str(e)
-            }
-            print(f"Error processing prompt {i+1}: {e}")
-        
-        results.append(result)
-        print(f"Completed in {result['generation_time']:.2f}s")
-        print("-" * 50)
+            print(f"Error processing chunk {chunk_start//batch_size + 1}: {e}")
+            # If chunk processing fails, create error results for all prompts in this chunk
+            for i, prompt in enumerate(chunk_prompts):
+                result = {
+                    "prompt_index": chunk_start + i,
+                    "prompt": prompt,
+                    "response": None,
+                    "generation_time": 0,
+                    "status": "error",
+                    "error": str(e)
+                }
+                all_results.append(result)
     
-    return results
+    end_time = time.time()
+    total_time = end_time - start_time
+    
+    # Update generation_time for each result (approximate per-prompt time)
+    if all_results:
+        avg_time_per_prompt = total_time / len(prompts)
+        for result in all_results:
+            result["generation_time"] = avg_time_per_prompt
+    
+    print(f"Batch processing completed in {total_time:.2f}s")
+    print(f"Average time per prompt: {total_time/len(prompts):.2f}s")
+    
+    return all_results
 
 def normalize_response(text: str) -> str:
     """
@@ -93,13 +147,70 @@ def normalize_response(text: str) -> str:
     """
     return " ".join(text.split())
 
+def post_process_sql(sql_text: str) -> str:
+    """
+    Post-process SQL output to remove markdown formatting and other verbosity.
+    
+    Args:
+        sql_text (str): The raw SQL text that may contain markdown formatting.
+        
+    Returns:
+        str: Clean SQL query without markdown formatting.
+    """
+    if not sql_text:
+        return ""
+    
+    # Remove markdown code blocks (```sql ... ``` or ``` ... ```)
+    import re
+    
+    # Remove ```sql at the beginning and ``` at the end
+    sql_text = re.sub(r'^```sql\s*', '', sql_text, flags=re.IGNORECASE)
+    sql_text = re.sub(r'^```\s*', '', sql_text)
+    sql_text = re.sub(r'\s*```\s*$', '', sql_text)
+    
+    # Remove any remaining backticks
+    sql_text = sql_text.replace('`', '')
+    
+    # Clean up whitespace - normalize to single spaces and remove leading/trailing whitespace
+    sql_text = " ".join(sql_text.split())
+    
+    # Remove common prefixes that models sometimes add
+    prefixes_to_remove = [
+        "here's the sql query:",
+        "here is the sql query:",
+        "the sql query is:",
+        "sql query:",
+        "query:",
+        "sql:",
+    ]
+    
+    sql_text_lower = sql_text.lower()
+    for prefix in prefixes_to_remove:
+        if sql_text_lower.startswith(prefix):
+            sql_text = sql_text[len(prefix):].strip()
+            break
+    
+    # Remove trailing punctuation that's not part of SQL
+    sql_text = sql_text.rstrip('.;')
+    
+    # Remove semicolons from the SQL text
+    sql_text = sql_text.replace(';', '')
+    
+    return sql_text.lower()
+
 def save_results(results: List[Dict[str, Any]], output_file: str = "pred.sql"):
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
     with open(output_file, "w", encoding="utf-8") as f:
         for query in results:
-            f.write(query['response'] + "\n")
+            if query['response']:
+                # Post-process the SQL to remove markdown formatting
+                clean_sql = post_process_sql(query['response'])
+                f.write(clean_sql + "\n")
+            else:
+                # Write empty line for failed queries
+                f.write("\n")
     print(f"Results saved to {output_file}")
 
 def load_prompts_from_file(file_path: str) -> List[str]:
@@ -120,7 +231,7 @@ def load_prompts_from_file(file_path: str) -> List[str]:
                 print(f"Warning: Invalid JSON on line {line_num}, skipping: {e}")
     return prompts
 
-def main(model_name, strategy, template, use_adapter, input_file):
+def main(model_name, strategy, template, use_adapter, input_file, batch_size=None):
     """
     Fine-tune either nl2SQL or nl2NatSQL models on a specified dataset.
     
@@ -150,10 +261,14 @@ def main(model_name, strategy, template, use_adapter, input_file):
         prompts=prompts,
         model=model,
         tokenizer=tokenizer,
-        max_tokens=MAX_TOKENS
+        max_tokens=MAX_TOKENS,
+        batch_size=batch_size
     )
     
-    output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file+'_predictions_'+finetuned+'.sql'}"
+    if finetuned:
+        output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file}_predictions_{finetuned}.sql"
+    else:
+        output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file}_predictions.sql"
     save_results(results, output_file)
     
     successful = sum(1 for r in results if r['status'] == 'success')
@@ -177,10 +292,13 @@ if __name__ == "__main__":
                             'mlx-community/Llama-3.2-1B-Instruct-4bit',     # 1B
                             'mlx-community/Llama-3.2-3B-Instruct-4bit',     # 3B
                             'mlx-community/Phi-4-mini-reasoning-4bit',      # 3.8B
+                            'Qwen/Qwen3-4B-MLX-4bit',                       # 4B
                             'mlx-community/Ministral-8B-Instruct-2410-4bit',# 8B
+                            'Qwen/Qwen3-8B-MLX-4bit',                       # 8B
                             'mlx-community/phi-4-4bit',                     # 14B
                             'mlx-community/Qwen3-14B-4bit',                 # 14B
                             'mlx-community/Phi-4-reasoning-plus-4bit'       # 14B
+                            'mlx-community/Phi-4-reasoning-4bit'            # 14B
                         ])
     parser.add_argument('--strategy', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
                        help='Strategy used to fine-tune')
@@ -190,5 +308,7 @@ if __name__ == "__main__":
                         help='Use adapter for inference (default: False)')
     parser.add_argument('--input-file', type=str, required=True,
                        help='Input file for prompts. MUST be a jsonl file')
+    parser.add_argument('--batch-size', type=int, default=None,
+                       help='Batch size for processing prompts. If not specified, processes all prompts at once. Use smaller values to avoid memory issues.')
     args = parser.parse_args()
-    main(args.model, args.strategy, args.template, args.use_adapter, args.input_file)
+    main(args.model, args.strategy, args.template, args.use_adapter, args.input_file, args.batch_size)

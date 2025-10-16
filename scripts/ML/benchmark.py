@@ -52,16 +52,32 @@ def main(model, strategy, template, predict_file):
     os.unlink(temp_file_path)
 
     predict_file = predict_file.removesuffix('.sql')
-    gold_file, finetuned = predict_file.split('_predictions_')
+    
+    # Handle both '_predictions_' and '_predictions' patterns
+    if '_predictions_' in predict_file:
+        gold_file, finetuned = predict_file.split('_predictions_')
+    elif '_predictions' in predict_file:
+        gold_file = predict_file.split('_predictions')[0]
+        finetuned = ''
+    else:
+        raise ValueError(f"Invalid prediction file format: {predict_file}. Expected format: 'filename_predictions[_finetuned].sql'")
     DB_DIR = f"{ROOT_PATH}/database/spider"
     GOLD = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{gold_file+'.sql'}"
     PREDICT = f"{ROOT_PATH}/data/predictions/{strategy}/{template_folder}/{model.removeprefix('mlx-community/')}/{predict_file+'.sql'}"
     ETYPE = "all" # all, easy, medium, hard
 
-    output_file=f"{ROOT_PATH}/data/benchmark/{strategy}/{template_folder}/{model.removeprefix('mlx-community/')}/{gold_file+'_benchmark_'+finetuned+'.txt'}"
+    if finetuned:
+        output_file=f"{ROOT_PATH}/data/benchmark/{strategy}/{template_folder}/{model.removeprefix('mlx-community/')}/{gold_file}_benchmark_{finetuned}.txt"
+    else:
+        output_file=f"{ROOT_PATH}/data/benchmark/{strategy}/{template_folder}/{model.removeprefix('mlx-community/')}/{gold_file}_benchmark.txt"
 
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    print(f"Starting evaluation...")
+    print(f"Gold file: {GOLD}")
+    print(f"Predict file: {PREDICT}")
+    print(f"Output file: {output_file}")
     
     with open(output_file, 'w') as f:
         original_stdout = sys.stdout
