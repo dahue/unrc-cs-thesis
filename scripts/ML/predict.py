@@ -14,6 +14,49 @@ if not ROOT_PATH:
 PRED_PATH = f"{ROOT_PATH}/data/predictions"
 
 
+def parse_model_spec(model_spec: str) -> tuple[str, bool]:
+    """
+    Parse a model specification string.
+    
+    Args:
+        model_spec: Model specification in format "model_name" or "model_name:fine-tuned"
+        
+    Returns:
+        Tuple of (model_name, use_adapter)
+        
+    Raises:
+        ValueError: If model_spec is empty or has invalid format
+    """
+    if not model_spec or not model_spec.strip():
+        raise ValueError("Model specification cannot be empty")
+    
+    model_spec = model_spec.strip()
+    
+    # Split by colon to check for :fine-tuned suffix
+    parts = model_spec.split(':')
+    
+    if len(parts) == 1:
+        # No colon, base model
+        return parts[0], False
+    elif len(parts) == 2:
+        # Has colon, check if second part is "fine-tuned"
+        model_name = parts[0].strip()
+        suffix = parts[1].strip().lower()
+        
+        if not model_name:
+            raise ValueError(f"Model name cannot be empty in specification: {model_spec}")
+        
+        if suffix == "fine-tuned":
+            return model_name, True
+        else:
+            # Has colon but not :fine-tuned, treat as base model but warn?
+            # Actually, let's be strict - if there's a colon, it must be :fine-tuned
+            raise ValueError(f"Invalid model specification suffix: '{suffix}'. Expected 'fine-tuned' or no suffix.")
+    else:
+        # Multiple colons - invalid
+        raise ValueError(f"Invalid model specification format: {model_spec}. Use 'model_name' or 'model_name:fine-tuned'")
+
+
 def load_model(model_path: str = "mlx-community/Llama-3.2-3B-Instruct-4bit", adapter_path: str = None):
     """Load the MLX model and tokenizer, optionally with LoRA adapter"""
     print(f"Loading model: {model_path}")
@@ -281,6 +324,111 @@ def process_self_consistent(
     
     return aggregated_results
 
+def process_cross_consistent(
+    prompts: List[str],
+    model_specs: List[str],
+    strategy: str,
+    template: str,
+    max_tokens: int = 512,
+    batch_size: int = None,
+    temperature: float = 0.0
+) -> List[Dict[str, Any]]:
+    """
+    Process prompts with cross-consistency (multiple models, one sample each).
+    
+    Args:
+        prompts: List of prompt strings to process
+        model_specs: List of model specifications (can include :fine-tuned suffix)
+        strategy: Strategy used (nl2SQL or nl2NatSQL)
+        template: Template name (used for adapter paths)
+        max_tokens: Maximum tokens to generate per prompt
+        batch_size: Maximum number of prompts to process in a single batch
+        temperature: Temperature for generation (can be 0.0 for deterministic)
+        
+    Returns:
+        List of aggregated results, one per prompt
+    """
+    import gc
+    
+    print(f"Starting cross-consistency processing with {len(model_specs)} models")
+    
+    template_folder = template.removesuffix('.j2')
+    
+    # Helper function to get model directory name
+    def get_model_dir_name(name: str) -> str:
+        """Extract model directory name, removing common prefixes"""
+        if name.startswith('mlx-community/'):
+            return name.removeprefix('mlx-community/')
+        if '/' in name:
+            return name.split('/')[-1]
+        return name
+    
+    # Store results from each model
+    all_model_results = []
+    model_names_list = []
+    
+    # Process each model sequentially
+    for model_idx, model_spec in enumerate(model_specs):
+        print(f"\n{'='*60}")
+        print(f"Processing model {model_idx + 1}/{len(model_specs)}: {model_spec}")
+        print(f"{'='*60}")
+        
+        # Parse model spec and load model
+        model_name, use_adapter = parse_model_spec(model_spec)
+        model_names_list.append(model_name)
+        
+        adapter_path = None
+        if use_adapter:
+            adapter_path = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{get_model_dir_name(model_name)}"
+        
+        model, tokenizer = load_model(model_name, adapter_path)
+        
+        # Process all prompts with this model
+        model_results = process_batch(
+            prompts=prompts,
+            model=model,
+            tokenizer=tokenizer,
+            max_tokens=max_tokens,
+            batch_size=batch_size
+        )
+        
+        # Add model identifier to each result
+        for result in model_results:
+            result['model_name'] = model_name
+            result['model_spec'] = model_spec
+        
+        all_model_results.append(model_results)
+        
+        # Unload model (set to None to help garbage collection)
+        print(f"Unloading model {model_idx + 1}/{len(model_specs)}")
+        model = None
+        tokenizer = None
+        gc.collect()  # Force garbage collection to free memory
+    
+    print(f"\n{'='*60}")
+    print(f"All models processed. Aggregating results...")
+    print(f"{'='*60}")
+    
+    # Reorganize results: List[Dict] per model → List[List[Dict]] per prompt
+    # Each prompt should have a list of results (one from each model)
+    samples_per_prompt = []
+    for prompt_idx in range(len(prompts)):
+        prompt_samples = []
+        for model_results in all_model_results:
+            if prompt_idx < len(model_results):
+                prompt_samples.append(model_results[prompt_idx])
+        samples_per_prompt.append(prompt_samples)
+    
+    # Aggregate results using majority voting
+    aggregated_results = aggregate_results_majority_vote(samples_per_prompt)
+    
+    # Update consistency mode and models_used for cross-consistency
+    for result in aggregated_results:
+        result["consistency_mode"] = "cross"
+        result["models_used"] = model_names_list
+    
+    return aggregated_results
+
 def normalize_response(text: str) -> str:
     """
     Normalize the LLM response to fit in a single line.
@@ -486,24 +634,54 @@ def load_prompts_from_file(file_path: str) -> List[str]:
                 print(f"Warning: Invalid JSON on line {line_num}, skipping: {e}")
     return prompts
 
-def main(model_name, strategy, template, use_adapter, input_file, batch_size=None, 
-         consistency_mode='self', num_samples=1, temperature=0.7):
+def main(model_specs: List[str], strategy, template, input_file, batch_size=None, 
+         consistency_mode='none', num_samples=1, temperature=0.7):
     """
-    Generate predictions using nl2SQL or nl2NatSQL models with optional self-consistency.
+    Generate predictions using nl2SQL or nl2NatSQL models with optional consistency modes.
     
     Args:
-        model_name (str): Model to use for inference
+        model_specs (List[str]): List of model specifications in format "model_name" or "model_name:fine-tuned"
         strategy (str): Strategy used (nl2SQL or nl2NatSQL)
         template (str): Template name to use
-        use_adapter (bool): Whether to use adapter for inference
         input_file (str): Input file for prompts
         batch_size (int): Batch size for processing
-        consistency_mode (str): Consistency strategy (none, self)
+        consistency_mode (str): Consistency strategy (none, self, cross)
         num_samples (int): Number of samples per prompt for consistency
         temperature (float): Temperature for sampling
     """
     MAX_TOKENS = 512
 
+    # Validate consistency mode and num_samples combination
+    if consistency_mode == 'none' and num_samples != 1:
+        raise ValueError(
+            f"num-samples is only valid for consistency-mode 'self' or 'cross'. "
+            f"Got consistency-mode='none' with num-samples={num_samples}. "
+            f"For 'none' mode, num-samples must be 1 (default)."
+        )
+    
+    # Validate cross mode requirements
+    if consistency_mode == 'cross':
+        if len(model_specs) < 2:
+            raise ValueError(
+                f"For 'cross' mode, at least 2 models are required. "
+                f"Got {len(model_specs)} model(s)."
+            )
+        # For cross mode, num_samples automatically equals number of models
+        # (each model generates exactly one sample)
+        num_samples = len(model_specs)
+    
+    # Validate 'none' and 'self' modes have exactly one model
+    if consistency_mode in ['none', 'self'] and len(model_specs) != 1:
+        raise ValueError(
+            f"For consistency-mode '{consistency_mode}', exactly 1 model is required. "
+            f"Got {len(model_specs)} model(s)."
+        )
+    
+    # Extract single model for 'none' and 'self' modes
+    if consistency_mode in ['none', 'self']:
+        model_spec = model_specs[0]
+        model_name, use_adapter = parse_model_spec(model_spec)
+    
     template_folder = template.removesuffix('.j2')
     input_file = input_file.removesuffix('.jsonl')
     data = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{input_file+'.jsonl'}"
@@ -512,21 +690,41 @@ def main(model_name, strategy, template, use_adapter, input_file, batch_size=Non
     
     print(f"Starting batch inference with {len(prompts)} prompts")
     print(f"Consistency mode: {consistency_mode}")
+    if consistency_mode == 'cross':
+        print(f"Number of models: {len(model_specs)}")
+        print(f"Number of samples: {num_samples} (one per model)")
+        print(f"Models: {', '.join([parse_model_spec(ms)[0] for ms in model_specs])}")
+    elif consistency_mode in ['none', 'self']:
+        print(f"Model: {model_name}{' (fine-tuned)' if use_adapter else ' (base)'}")
     if consistency_mode == 'self':
         print(f"Number of samples: {num_samples}")
         print(f"Temperature: {temperature}")
+    elif consistency_mode == 'cross':
+        print(f"Temperature: {temperature}")
     print("=" * 60)
+
+    # Helper function to get model directory name (remove prefix for directory structure)
+    def get_model_dir_name(name: str) -> str:
+        """Extract model directory name, removing common prefixes"""
+        # Remove mlx-community/ prefix if present
+        if name.startswith('mlx-community/'):
+            return name.removeprefix('mlx-community/')
+        # Remove other prefixes if needed (e.g., Qwen/)
+        if '/' in name:
+            return name.split('/')[-1]
+        return name
 
     # Process based on consistency mode
     if consistency_mode == 'none':
-        # Standard processing
-        finetuned = ''
+        model_dir_name = get_model_dir_name(model_name)
+        
+        # Build adapter path if needed
+        finetuned = 'finetuned' if use_adapter else ''
+        adapter_path = None
         if use_adapter:
-            finetuned = 'finetuned'
-            adapter = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}"
-            model, tokenizer = load_model(model_name, adapter)
-        else:
-            model, tokenizer = load_model(model_name)
+            adapter_path = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model_dir_name}"
+        # Standard processing
+        model, tokenizer = load_model(model_name, adapter_path)
         
         results = process_batch(
             prompts=prompts,
@@ -538,21 +736,23 @@ def main(model_name, strategy, template, use_adapter, input_file, batch_size=Non
         
         # Set output file names
         if finetuned:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file}_predictions_{finetuned}.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file}_predictions_{finetuned}_detailed.jsonl"
+            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_{finetuned}.sql"
+            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_{finetuned}_detailed.jsonl"
         else:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file}_predictions.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file}_predictions_detailed.jsonl"
+            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions.sql"
+            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_detailed.jsonl"
     
     elif consistency_mode == 'self':
         # Self-consistency: same model, multiple samples
-        finetuned = ''
+        model_dir_name = get_model_dir_name(model_name)
+        
+        # Build adapter path if needed
+        finetuned = 'finetuned' if use_adapter else ''
+        adapter_path = None
         if use_adapter:
-            finetuned = 'finetuned'
-            adapter = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}"
-            model, tokenizer = load_model(model_name, adapter)
-        else:
-            model, tokenizer = load_model(model_name)
+            adapter_path = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model_dir_name}"
+        
+        model, tokenizer = load_model(model_name, adapter_path)
         
         results = process_self_consistent(
             prompts=prompts,
@@ -566,11 +766,33 @@ def main(model_name, strategy, template, use_adapter, input_file, batch_size=Non
         
         # Set output file names
         if finetuned:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file}_predictions_self_{finetuned}.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file}_predictions_self_{finetuned}_detailed.jsonl"
+            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_self_{finetuned}.sql"
+            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_self_{finetuned}_detailed.jsonl"
         else:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file}_predictions_self.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_name.removeprefix('mlx-community/')}/{input_file}_predictions_self_detailed.jsonl"
+            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_self.sql"
+            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_self_detailed.jsonl"
+    
+    elif consistency_mode == 'cross':
+        # Cross-consistency: multiple models, one sample each
+        results = process_cross_consistent(
+            prompts=prompts,
+            model_specs=model_specs,
+            strategy=strategy,
+            template=template,
+            max_tokens=MAX_TOKENS,
+            batch_size=batch_size,
+            temperature=temperature
+        )
+        
+        # Create a directory name based on the first model (for organization)
+        # Or use a hash/shortened identifier for multiple models
+        first_model_name, _ = parse_model_spec(model_specs[0])
+        model_dir_name = get_model_dir_name(first_model_name)
+        
+        # Output file naming for cross-consistency
+        num_models = len(model_specs)
+        output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_cross_{num_models}models.sql"
+        detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_cross_{num_models}models_detailed.jsonl"
     
     else:
         raise ValueError(f"Unknown consistency mode: {consistency_mode}")
@@ -585,12 +807,17 @@ def main(model_name, strategy, template, use_adapter, input_file, batch_size=Non
     
     # Calculate consistency statistics if applicable
     consistency_stats = ""
-    if consistency_mode == 'self':
-        avg_consistency = sum(r.get('consistency_score', 0) for r in results) / len(results)
+    if consistency_mode in ['self', 'cross']:
+        avg_consistency = sum(r.get('consistency_score', 0) for r in results) / len(results) if results else 0
         high_consistency = sum(1 for r in results if r.get('consistency_score', 0) > 0.8)
         consistency_stats = f"\nConsistency Statistics:"
         consistency_stats += f"\nAverage consistency score: {avg_consistency:.3f}"
         consistency_stats += f"\nHigh consistency (>0.8): {high_consistency}/{len(results)}"
+        
+        if consistency_mode == 'cross' and results:
+            models_used = results[0].get('models_used', [])
+            if models_used:
+                consistency_stats += f"\nModels used: {len(models_used)} ({', '.join([get_model_dir_name(m) for m in models_used])})"
     
     print("=" * 60)
     print("BATCH PROCESSING COMPLETE")
@@ -606,39 +833,95 @@ def main(model_name, strategy, template, use_adapter, input_file, batch_size=Non
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Batch inference using nl2SQL or nl2NatSQL models')
-    parser.add_argument('--model', type=str, required=True,
-                       help='Model to fine-tune', choices=[
-                            'mlx-community/Llama-3.2-1B-Instruct-4bit',     # 1B
-                            'mlx-community/Llama-3.2-3B-Instruct-4bit',     # 3B
-                            'mlx-community/Phi-4-mini-reasoning-4bit',      # 3.8B
-                            'Qwen/Qwen3-4B-MLX-4bit',                       # 4B
-                            'mlx-community/Ministral-8B-Instruct-2410-4bit',# 8B
-                            'Qwen/Qwen3-8B-MLX-4bit',                       # 8B
-                            'mlx-community/phi-4-4bit',                     # 14B
-                            'mlx-community/Qwen3-14B-4bit',                 # 14B
-                            'mlx-community/Phi-4-reasoning-plus-4bit'       # 14B
-                            'mlx-community/Phi-4-reasoning-4bit'            # 14B
-                        ])
+    
+    # Define valid base model names (without :fine-tuned suffix)
+    valid_models = [
+        'mlx-community/Llama-3.2-1B-Instruct-4bit',     # 1B
+        'mlx-community/Llama-3.2-3B-Instruct-4bit',     # 3B
+        'mlx-community/Phi-4-mini-reasoning-4bit',      # 3.8B
+        'Qwen/Qwen3-4B-MLX-4bit',                       # 4B
+        'mlx-community/Ministral-8B-Instruct-2410-4bit',# 8B
+        'Qwen/Qwen3-8B-MLX-4bit',                       # 8B
+        'mlx-community/phi-4-4bit',                     # 14B
+        'mlx-community/Qwen3-14B-4bit',                 # 14B
+        'mlx-community/Phi-4-reasoning-plus-4bit',      # 14B
+        'mlx-community/Phi-4-reasoning-4bit'            # 14B
+    ]
+    
+    def validate_model_spec(value: str) -> str:
+        """Validate model specification format"""
+        try:
+            model_name, _ = parse_model_spec(value)
+            # Check if base model name is in valid list
+            if model_name not in valid_models:
+                raise argparse.ArgumentTypeError(
+                    f"Model '{model_name}' not in valid models list. "
+                    f"Valid models: {', '.join(valid_models)}"
+                )
+            return value
+        except ValueError as e:
+            raise argparse.ArgumentTypeError(str(e))
+    
+    def validate_models_list(value):
+        """Validate each model in the list"""
+        # This will be called for each model in nargs='+'
+        return validate_model_spec(value)
+    
+    parser.add_argument('--models', type=validate_models_list, nargs='+', required=True,
+                       help='Model(s) to use. Format: "model_name" or "model_name:fine-tuned". '
+                            'For single model: --models model1 '
+                            'For multiple models: --models model1 model2 model3. '
+                            'Examples: --models mlx-community/Llama-3.2-3B-Instruct-4bit or '
+                            '--models mlx-community/Llama-3.2-1B-Instruct-4bit mlx-community/Llama-3.2-3B-Instruct-4bit')
     parser.add_argument('--strategy', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
                        help='Strategy used to fine-tune')
     parser.add_argument('--template', type=str, default='template_12',
                        help='Template name to use for training data (default: template_12)')
-    parser.add_argument('--use-adapter', action='store_true', default=False,
-                        help='Use adapter for inference (default: False)')
     parser.add_argument('--input-file', type=str, required=True,
                        help='Input file for prompts. MUST be a jsonl file')
     parser.add_argument('--batch-size', type=int, default=None,
                        help='Batch size for processing prompts. If not specified, processes all prompts at once. Use smaller values to avoid memory issues.')
     
     # Self-consistency arguments
-    parser.add_argument('--consistency-mode', type=str, default='self',
-                       choices=['none', 'self'],
-                       help='Consistency strategy (default: self)')
+    parser.add_argument('--consistency-mode', type=str, default='none',
+                       choices=['none', 'self', 'cross'],
+                       help='Consistency strategy (default: none). '
+                            'num-samples is only valid for "self" mode. '
+                            'For "cross" mode, num-samples is automatically set to number of models.')
     parser.add_argument('--num-samples', type=int, default=1,
-                       help='Number of samples per prompt for consistency (default: 1)')
+                       help='Number of samples per prompt for consistency (default: 1). '
+                            'Only valid for consistency-mode "self". '
+                            'For "cross" mode, automatically set to number of models (one sample per model).')
     parser.add_argument('--temperature', type=float, default=0.7,
                        help='Temperature for sampling in consistency mode (default: 0.7)')
     
     args = parser.parse_args()
-    main(args.model, args.strategy, args.template, args.use_adapter, args.input_file, args.batch_size, 
+    
+    # Validate arguments
+    if args.consistency_mode == 'none' and args.num_samples != 1:
+        parser.error(
+            f"num-samples is only valid for consistency-mode 'self' or 'cross'. "
+            f"Got consistency-mode='none' with num-samples={args.num_samples}. "
+            f"For 'none' mode, num-samples must be 1 (default)."
+        )
+    
+    # Validate cross mode requirements
+    if args.consistency_mode == 'cross':
+        if len(args.models) < 2:
+            parser.error(
+                f"For 'cross' mode, at least 2 models are required. "
+                f"Got {len(args.models)} model(s)."
+            )
+        # For cross mode, num_samples automatically equals number of models
+        # (each model generates exactly one sample)
+        args.num_samples = len(args.models)
+    
+    # Validate 'none' and 'self' modes have exactly one model
+    if args.consistency_mode in ['none', 'self'] and len(args.models) != 1:
+        parser.error(
+            f"For consistency-mode '{args.consistency_mode}', exactly 1 model is required. "
+            f"Got {len(args.models)} model(s)."
+        )
+    
+    main(args.models, args.strategy, args.template, args.input_file, args.batch_size, 
          args.consistency_mode, args.num_samples, args.temperature)
