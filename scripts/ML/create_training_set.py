@@ -8,6 +8,7 @@ import nltk
 import spacy
 import subprocess
 import time
+import hashlib
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from jinja2 import Environment, FileSystemLoader
 from dotenv import load_dotenv
@@ -39,6 +40,98 @@ ROOT_PATH = os.environ["ROOT_PATH"]
 SPIDER_DB_PATH = f"{ROOT_PATH}/database/spider"
 
 GOLD_DB = f"{ROOT_PATH}/database/gold/gold.sqlite"
+CACHE_DIR = f"{ROOT_PATH}/data/cache/few_shot"
+
+def generate_cache_key(difficulties, test_limit):
+    """
+    Generate a cache key based on difficulty and test_limit parameters.
+    
+    Args:
+        difficulties: List of difficulty levels or None
+        test_limit: Integer limit or None
+    
+    Returns:
+        String cache key
+    """
+    # Sort difficulties to ensure consistent key generation
+    difficulty_str = "_".join(sorted(difficulties)) if difficulties else "all"
+    test_limit_str = str(test_limit) if test_limit else "all"
+    key_string = f"difficulty_{difficulty_str}_testlimit_{test_limit_str}"
+    return hashlib.md5(key_string.encode()).hexdigest()
+
+def get_cache_path(cache_key):
+    """Get the full path to the cache file for a given cache key."""
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    return os.path.join(CACHE_DIR, f"few_shot_{cache_key}.json")
+
+def load_few_shot_cache(cache_key, test_entries):
+    """
+    Load few-shot examples from cache if available and valid.
+    
+    Args:
+        cache_key: Cache key string
+        test_entries: List of test entries to validate cache against
+    
+    Returns:
+        List of few-shot strings (one per test entry) or None if cache invalid/missing
+    """
+    cache_path = get_cache_path(cache_key)
+    
+    if not os.path.exists(cache_path):
+        return None
+    
+    try:
+        with open(cache_path, 'r') as f:
+            cache_data = json.load(f)
+        
+        # Validate cache: check if it matches the current test entries
+        cached_entries = cache_data.get("entries", [])
+        if len(cached_entries) != len(test_entries):
+            print(f"Cache invalid: entry count mismatch ({len(cached_entries)} vs {len(test_entries)})")
+            return None
+        
+        # Validate by checking question + schema for each entry
+        for i, (cached_entry, test_entry) in enumerate(zip(cached_entries, test_entries)):
+            if cached_entry.get("question") != test_entry["question"] or \
+               cached_entry.get("simplified_ddl") != test_entry["simplified_ddl"]:
+                print(f"Cache invalid: entry {i} mismatch")
+                return None
+        
+        print(f"✓ Loaded few-shot cache from {cache_path}")
+        return cache_data.get("few_shots", [])
+    
+    except (json.JSONDecodeError, KeyError, Exception) as e:
+        print(f"Error loading cache: {e}")
+        return None
+
+def save_few_shot_cache(cache_key, test_entries, few_shots):
+    """
+    Save few-shot examples to cache.
+    
+    Args:
+        cache_key: Cache key string
+        test_entries: List of test entries
+        few_shots: List of few-shot strings (one per test entry)
+    """
+    cache_path = get_cache_path(cache_key)
+    
+    # Store entries metadata for validation
+    entries_metadata = [
+        {"question": entry["question"], "simplified_ddl": entry["simplified_ddl"]}
+        for entry in test_entries
+    ]
+    
+    cache_data = {
+        "entries": entries_metadata,
+        "few_shots": few_shots
+    }
+    
+    try:
+        with open(cache_path, 'w') as f:
+            json.dump(cache_data, f, indent=2)
+        print(f"✓ Saved few-shot cache to {cache_path}")
+    except Exception as e:
+        print(f"Error saving cache: {e}")
 
 def get_full_ddl(entry):
     full_ddl = json.loads(entry["full_ddl"])
@@ -92,7 +185,7 @@ def get_foreign_keys(entry):
     return "\n".join(formatted_foreign_keys)
 
 
-def create_prompts(entries, template, query_type="sql", skeleton_dataset=None, max_workers=None):
+def create_prompts(entries, template, query_type="sql", skeleton_dataset=None, max_workers=None, few_shots_list=None):
     """
     Create prompts for all entries using parallel processing while maintaining order.
     
@@ -102,6 +195,7 @@ def create_prompts(entries, template, query_type="sql", skeleton_dataset=None, m
         query_type: Type of query ("sql" or "natsql")
         skeleton_dataset: Optional skeleton dataset for few-shot learning
         max_workers: Maximum number of worker processes (default: min(32, os.cpu_count() + 4))
+        few_shots_list: Optional pre-computed list of few-shot examples (one per entry)
     
     Returns:
         List of prompts in the same order as input entries
@@ -109,13 +203,17 @@ def create_prompts(entries, template, query_type="sql", skeleton_dataset=None, m
     if not entries:
         return []
     
+    # Validate few_shots_list length if provided
+    if few_shots_list is not None and len(few_shots_list) != len(entries):
+        raise ValueError(f"few_shots_list length ({len(few_shots_list)}) must match entries length ({len(entries)})")
+    
     start_time = time.time()
     print(f"Creating prompts for {len(entries)} entries...")
     
     # For small datasets or when max_workers is 1, use sequential processing
     if max_workers == 1 or len(entries) < 10:
         prompts = []
-        for entry in entries:
+        for i, entry in enumerate(entries):
             params = {}
             params["query_type"] = query_type
             params["question"] = entry["question"]
@@ -123,7 +221,10 @@ def create_prompts(entries, template, query_type="sql", skeleton_dataset=None, m
             params["simplified_ddl"] = get_simplified_ddl(entry)
             params["foreign_keys"] = get_foreign_keys(entry)
             params["cell_values"] = get_cell_values(entry)
-            params["few_shot"] = get_few_shot(entry["question"], entry["simplified_ddl"], skeleton_dataset)
+            if few_shots_list is not None:
+                params["few_shot"] = few_shots_list[i]
+            else:
+                params["few_shot"] = get_few_shot(entry["question"], entry["simplified_ddl"], skeleton_dataset)
             prompt = template.render(params)
             prompts.append(prompt)
         
@@ -138,7 +239,8 @@ def create_prompts(entries, template, query_type="sql", skeleton_dataset=None, m
     print(f"Using {max_workers} worker threads for parallel processing...")
     
     # Process entries in parallel using ThreadPoolExecutor for I/O bound tasks
-    def process_entry(entry):
+    def process_entry(entry_index):
+        entry = entries[entry_index]
         params = {}
         params["query_type"] = query_type
         params["question"] = entry["question"]
@@ -146,7 +248,10 @@ def create_prompts(entries, template, query_type="sql", skeleton_dataset=None, m
         params["simplified_ddl"] = get_simplified_ddl(entry)
         params["foreign_keys"] = get_foreign_keys(entry)
         params["cell_values"] = get_cell_values(entry)
-        params["few_shot"] = get_few_shot(entry["question"], entry["simplified_ddl"], skeleton_dataset)
+        if few_shots_list is not None:
+            params["few_shot"] = few_shots_list[entry_index]
+        else:
+            params["few_shot"] = get_few_shot(entry["question"], entry["simplified_ddl"], skeleton_dataset)
         prompt = template.render(params)
         return prompt
     
@@ -155,8 +260,8 @@ def create_prompts(entries, template, query_type="sql", skeleton_dataset=None, m
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         # Submit all tasks and keep track of their indices
         future_to_index = {
-            executor.submit(process_entry, entry): i 
-            for i, entry in enumerate(entries)
+            executor.submit(process_entry, i): i 
+            for i in range(len(entries))
         }
         
         # Collect results as they complete, but maintain order
@@ -180,7 +285,10 @@ def create_prompts(entries, template, query_type="sql", skeleton_dataset=None, m
                 params["simplified_ddl"] = get_simplified_ddl(entry)
                 params["foreign_keys"] = get_foreign_keys(entry)
                 params["cell_values"] = get_cell_values(entry)
-                params["few_shot"] = get_few_shot(entry["question"], entry["simplified_ddl"], skeleton_dataset)
+                if few_shots_list is not None:
+                    params["few_shot"] = few_shots_list[index]
+                else:
+                    params["few_shot"] = get_few_shot(entry["question"], entry["simplified_ddl"], skeleton_dataset)
                 prompt = template.render(params)
                 prompts[index] = prompt
                 completed_count += 1
@@ -195,10 +303,10 @@ def create_completions(entries, query_type="sql"):
         completions.append(entry["query"] if query_type == "sql" else entry[query_type])
     return completions
 
-def create_dataset(entries, template, strategy, skeleton_dataset=None, max_workers=None):
+def create_dataset(entries, template, strategy, skeleton_dataset=None, max_workers=None, few_shots_list=None):
     query_type = "sql" if strategy == "nl2SQL" else "natsql"
     processed_data = []
-    prompts = create_prompts(entries, template, query_type, skeleton_dataset, max_workers)
+    prompts = create_prompts(entries, template, query_type, skeleton_dataset, max_workers, few_shots_list)
     completions = create_completions(entries, query_type)
     for prompt, completion in zip(prompts, completions):
         processed_data.append({"prompt": prompt, "completion": completion})
@@ -301,6 +409,76 @@ def get_few_shot(question, schema, train_skeleton_data=None):
         for i, (idx, score, skeleton_question, full_question, sql_query) in enumerate(similar_skeletons, 1):
             few_shot += f"{full_question}\n{sql_query}\n"
         return few_shot
+
+def compute_few_shots_for_entries(entries, train_skeleton_data, max_workers=None):
+    """
+    Compute few-shot examples for all entries.
+    
+    Args:
+        entries: List of database entries
+        train_skeleton_data: Training skeleton dataset for few-shot learning
+        max_workers: Maximum number of worker processes
+    
+    Returns:
+        List of few-shot strings (one per entry)
+    """
+    if train_skeleton_data is None:
+        return [""] * len(entries)
+    
+    start_time = time.time()
+    print(f"Computing few-shot examples for {len(entries)} entries...")
+    
+    # For small datasets or when max_workers is 1, use sequential processing
+    if max_workers == 1 or len(entries) < 10:
+        few_shots = []
+        for entry in entries:
+            few_shot = get_few_shot(entry["question"], entry["simplified_ddl"], train_skeleton_data)
+            few_shots.append(few_shot)
+        
+        elapsed_time = time.time() - start_time
+        print(f"✓ Few-shot examples computed in {elapsed_time:.2f} seconds (sequential processing)")
+        return few_shots
+    
+    # Use parallel processing for larger datasets
+    if max_workers is None:
+        max_workers = min(32, (os.cpu_count() or 1) + 4)
+    
+    print(f"Using {max_workers} worker threads for parallel few-shot computation...")
+    
+    def compute_few_shot(entry_index):
+        entry = entries[entry_index]
+        return get_few_shot(entry["question"], entry["simplified_ddl"], train_skeleton_data)
+    
+    few_shots = [None] * len(entries)  # Pre-allocate list to maintain order
+    
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit all tasks and keep track of their indices
+        future_to_index = {
+            executor.submit(compute_few_shot, i): i 
+            for i in range(len(entries))
+        }
+        
+        # Collect results as they complete, but maintain order
+        completed_count = 0
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            try:
+                few_shot = future.result()
+                few_shots[index] = few_shot
+                completed_count += 1
+                if completed_count % 100 == 0:  # Progress indicator
+                    print(f"  Computed {completed_count}/{len(entries)} few-shot examples...")
+            except Exception as exc:
+                print(f'Entry {index} generated an exception: {exc}')
+                # Fallback to original processing for this entry
+                entry = entries[index]
+                few_shot = get_few_shot(entry["question"], entry["simplified_ddl"], train_skeleton_data)
+                few_shots[index] = few_shot
+                completed_count += 1
+    
+    elapsed_time = time.time() - start_time
+    print(f"✓ Few-shot examples computed in {elapsed_time:.2f} seconds (parallel processing with {max_workers} workers)")
+    return few_shots
 
 def main(strategy, template_name, difficulties=None, test_limit=None, max_workers=None):
     """
@@ -406,8 +584,19 @@ def main(strategy, template_name, difficulties=None, test_limit=None, max_worker
     print(f"\nCreating validation dataset ({len(valid_entries)} entries)...")
     valid_data = create_dataset(valid_entries, template, strategy=strategy, max_workers=max_workers)
     
+    # Handle few-shot caching for test dataset
     print(f"\nCreating test dataset ({len(test_entries)} entries)...")
-    test_data = create_dataset(test_entries, template, strategy=strategy, skeleton_dataset=test_skeleton_data, max_workers=max_workers)
+    cache_key = generate_cache_key(difficulties, test_limit)
+    cached_few_shots = load_few_shot_cache(cache_key, test_entries)
+    
+    if cached_few_shots is None:
+        # Compute few-shots and cache them
+        few_shots_list = compute_few_shots_for_entries(test_entries, test_skeleton_data, max_workers)
+        save_few_shot_cache(cache_key, test_entries, few_shots_list)
+    else:
+        few_shots_list = cached_few_shots
+    
+    test_data = create_dataset(test_entries, template, strategy=strategy, max_workers=max_workers, few_shots_list=few_shots_list)
 
     train_sql_data = create_sql_dataset(train_entries)
     valid_sql_data = create_sql_dataset(valid_entries)

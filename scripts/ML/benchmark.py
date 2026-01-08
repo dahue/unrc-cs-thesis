@@ -63,13 +63,15 @@ def main(model, strategy, template, predict_file):
         raise ValueError(f"Invalid prediction file format: {predict_file}. Expected format: 'filename_predictions[_finetuned].sql'")
     DB_DIR = f"{ROOT_PATH}/database/spider"
     GOLD = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{gold_file+'.sql'}"
-    PREDICT = f"{ROOT_PATH}/data/predictions/{strategy}/{template_folder}/{model.removeprefix('mlx-community/')}/{predict_file+'.sql'}"
+    # Extract model name (last part after splitting by '/')
+    model_name = model.split('/')[-1]
+    PREDICT = f"{ROOT_PATH}/data/predictions/{strategy}/{template_folder}/{model_name}/{predict_file+'.sql'}"
     ETYPE = "all" # all, easy, medium, hard
 
     if finetuned:
-        output_file=f"{ROOT_PATH}/data/benchmark/{strategy}/{template_folder}/{model.removeprefix('mlx-community/')}/{gold_file}_benchmark_{finetuned}.txt"
+        output_file=f"{ROOT_PATH}/data/benchmark/{strategy}/{template_folder}/{model_name}/{gold_file}_benchmark_{finetuned}.txt"
     else:
-        output_file=f"{ROOT_PATH}/data/benchmark/{strategy}/{template_folder}/{model.removeprefix('mlx-community/')}/{gold_file}_benchmark.txt"
+        output_file=f"{ROOT_PATH}/data/benchmark/{strategy}/{template_folder}/{model_name}/{gold_file}_benchmark.txt"
 
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
