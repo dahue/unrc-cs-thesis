@@ -2,7 +2,7 @@ import os
 import subprocess
 from dotenv import load_dotenv
 
-def main(model, strategy, template):
+def main(model, strategy, template, iters):
     """
     Fine-tune either nl2SQL or nl2NatSQL models on a specified dataset.
     
@@ -10,6 +10,7 @@ def main(model, strategy, template):
         model (str): Model to fine-tune
         strategy (str): Either 'nl2SQL' or 'nl2NatSQL'
         template (str): Template name to use for training data (default: template_11)
+        iters (int): Number of training iterations
     """
     if strategy not in ['nl2SQL', 'nl2NatSQL']:
         raise ValueError("strategy must be either 'nl2SQL' or 'nl2NatSQL'")
@@ -29,7 +30,7 @@ def main(model, strategy, template):
         "--train",
         "--data", f"{ROOT_PATH}/data/training/{strategy}/{template_folder}",
         "--adapter-path", f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model.removeprefix('mlx-community/')}",
-        "--iters", "100",
+        "--iters", str(iters),
         "--max-seq-length", "2048", # default 2048
         "--batch-size", "2",
         "--num-layers", "8"
@@ -47,10 +48,27 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Fine-tune nl2SQL or nl2NatSQL models')
     parser.add_argument('--model', type=str, required=True,
-                       help='Model to fine-tune', choices=['mlx-community/Llama-3.2-3B-Instruct-4bit', 'mlx-community/Llama-3.2-1B-Instruct-4bit'])
+                       help='Model to fine-tune', choices=[
+                            'mlx-community/Qwen3-14B-4bit',                   # 14B
+                            'mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit',# 14B
+                            'mlx-community/phi-4-4bit',                       # 14B
+                            'mlx-community/Ministral-8B-Instruct-2410-4bit',  # 8B
+                            'mlx-community/Meta-Llama-3.1-8B-Instruct-4bit',  # 8B
+                            'mlx-community/Llama-3.2-3B-Instruct-4bit',       # 3B
+                            'mlx-community/Llama-3.2-1B-Instruct-4bit',       # 1B
+
+                            'mlx-community/Phi-4-mini-reasoning-4bit',        # 3.8B
+                            'Qwen/Qwen3-4B-MLX-4bit',                         # 4B
+                            'mlx-community/DeepSeek-R1-Distill-Qwen-7B-8bit', # 7B
+                            'Qwen/Qwen3-8B-MLX-4bit',                         # 8B
+                            'mlx-community/Phi-4-reasoning-plus-4bit',        # 14B
+                            'mlx-community/Phi-4-reasoning-4bit'              # 14B
+    ])
     parser.add_argument('--strategy', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
                        help='Strategy used to fine-tune')
     parser.add_argument('--template', type=str, default='template_12',
                        help='Template name to use for training data (default: template_12)')
+    parser.add_argument('--iters', type=int, default=100,
+                       help='Number of training iterations (default: 100)')
     args = parser.parse_args()
-    main(args.model, args.strategy, args.template)
+    main(args.model, args.strategy, args.template, args.iters)

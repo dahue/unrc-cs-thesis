@@ -331,10 +331,12 @@ def process_cross_consistent(
     template: str,
     max_tokens: int = 512,
     batch_size: int = None,
-    temperature: float = 0.0
+    temperature: float = 0.0,
+    input_file: str = None
 ) -> List[Dict[str, Any]]:
     """
     Process prompts with cross-consistency (multiple models, one sample each).
+    Uses semantic comparison (execution results) for aggregation.
     
     Args:
         prompts: List of prompt strings to process
@@ -344,6 +346,7 @@ def process_cross_consistent(
         max_tokens: Maximum tokens to generate per prompt
         batch_size: Maximum number of prompts to process in a single batch
         temperature: Temperature for generation (can be 0.0 for deterministic)
+        input_file: Path to the input JSONL file (used to load database IDs)
         
     Returns:
         List of aggregated results, one per prompt
@@ -406,7 +409,7 @@ def process_cross_consistent(
         gc.collect()  # Force garbage collection to free memory
     
     print(f"\n{'='*60}")
-    print(f"All models processed. Aggregating results...")
+    print(f"All models processed. Aggregating results using semantic comparison...")
     print(f"{'='*60}")
     
     # Reorganize results: List[Dict] per model → List[List[Dict]] per prompt
@@ -419,8 +422,24 @@ def process_cross_consistent(
                 prompt_samples.append(model_results[prompt_idx])
         samples_per_prompt.append(prompt_samples)
     
-    # Aggregate results using majority voting
-    aggregated_results = aggregate_results_majority_vote(samples_per_prompt)
+    # Load database IDs if input file is provided
+    db_ids = None
+    if input_file:
+        try:
+            template_folder = template.removesuffix('.j2')
+            input_file_clean = input_file.removesuffix('.jsonl')
+            data_path = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{input_file_clean+'.jsonl'}"
+            _, db_ids = load_prompts_with_db_ids(data_path)
+            print(f"Loaded database IDs for {len([d for d in db_ids if d])} prompts")
+        except Exception as e:
+            print(f"Warning: Could not load database IDs from {input_file}: {e}")
+            print("Falling back to extracting db_id from samples or using syntactic comparison")
+    
+    # Aggregate results using semantic majority voting (execution results)
+    aggregated_results = aggregate_results_semantic_majority_vote(
+        samples_per_prompt=samples_per_prompt,
+        db_ids=db_ids
+    )
     
     # Update consistency mode and models_used for cross-consistency
     for result in aggregated_results:
@@ -445,6 +464,7 @@ def normalize_response(text: str) -> str:
 def post_process_sql(sql_text: str) -> str:
     """
     Post-process SQL output to remove markdown formatting and other verbosity.
+    Handles chain-of-thought reasoning tags and markdown code blocks.
     
     Args:
         sql_text (str): The raw SQL text that may contain markdown formatting.
@@ -455,13 +475,31 @@ def post_process_sql(sql_text: str) -> str:
     if not sql_text:
         return ""
     
-    # Remove markdown code blocks (```sql ... ``` or ``` ... ```)
     import re
     
-    # Remove ```sql at the beginning and ``` at the end
-    sql_text = re.sub(r'^```sql\s*', '', sql_text, flags=re.IGNORECASE)
-    sql_text = re.sub(r'^```\s*', '', sql_text)
-    sql_text = re.sub(r'\s*```\s*$', '', sql_text)
+    # Step 1: If there's a `</think>` tag, extract everything after it
+    if '`</think>`' in sql_text:
+        parts = sql_text.split('`</think>`', 1)
+        if len(parts) > 1:
+            sql_text = parts[1].strip()
+    
+    # Step 2: Extract SQL from markdown code blocks (```sql ... ```)
+    # Use multiline and dotall flags to match across newlines
+    sql_block_pattern = r'```sql\s*(.*?)\s*```'
+    match = re.search(sql_block_pattern, sql_text, re.IGNORECASE | re.DOTALL)
+    if match:
+        sql_text = match.group(1).strip()
+    else:
+        # Fallback: try to match generic code blocks (``` ... ```)
+        generic_block_pattern = r'```\s*(.*?)\s*```'
+        match = re.search(generic_block_pattern, sql_text, re.DOTALL)
+        if match:
+            sql_text = match.group(1).strip()
+        else:
+            # If no code block found, remove any leading/trailing ```sql or ```
+            sql_text = re.sub(r'^```sql\s*', '', sql_text, flags=re.IGNORECASE)
+            sql_text = re.sub(r'^```\s*', '', sql_text)
+            sql_text = re.sub(r'\s*```\s*$', '', sql_text)
     
     # Remove any remaining backticks
     sql_text = sql_text.replace('`', '')
@@ -591,6 +629,305 @@ def aggregate_results_majority_vote(samples_per_prompt: List[List[Dict[str, Any]
     
     return aggregated_results
 
+def execute_sql_query(sql_query: str, db_path: str) -> tuple[Any, str]:
+    """
+    Execute a SQL query against a database and return the result set.
+    
+    Args:
+        sql_query: SQL query string to execute
+        db_path: Path to the SQLite database file
+        
+    Returns:
+        Tuple of (result_dataframe, error_message)
+        If successful, error_message is None and result_dataframe is a pandas DataFrame
+        If failed, error_message contains the error and result_dataframe is None
+    """
+    import sqlite3
+    import pandas as pd
+    
+    if not sql_query or not sql_query.strip():
+        return None, "Empty SQL query"
+    
+    if not os.path.exists(db_path):
+        return None, f"Database file not found: {db_path}"
+    
+    try:
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
+        
+        # Execute query
+        cursor.execute(sql_query)
+        
+        # Get column names
+        columns = [desc[0] for desc in cursor.description] if cursor.description else []
+        
+        # Fetch all rows
+        rows = cursor.fetchall()
+        
+        # Create DataFrame
+        if columns:
+            df = pd.DataFrame(rows, columns=columns)
+            # Sort by all columns for consistent comparison
+            df = df.sort_values(by=columns, axis=0).reset_index(drop=True)
+        else:
+            # For queries like INSERT, UPDATE, DELETE that return no rows
+            df = pd.DataFrame()
+        
+        conn.close()
+        return df, None
+        
+    except Exception as e:
+        return None, str(e)
+
+def compare_sql_results_semantically(result1: Any, result2: Any) -> bool:
+    """
+    Compare two SQL execution results semantically.
+    
+    Args:
+        result1: First result (pandas DataFrame or None)
+        result2: Second result (pandas DataFrame or None)
+        
+    Returns:
+        True if results are semantically equivalent, False otherwise
+    """
+    import pandas as pd
+    
+    # Both None or both empty
+    if result1 is None and result2 is None:
+        return True
+    
+    # One is None, other is not
+    if result1 is None or result2 is None:
+        return False
+    
+    # Both are DataFrames
+    if isinstance(result1, pd.DataFrame) and isinstance(result2, pd.DataFrame):
+        # Both empty
+        if result1.empty and result2.empty:
+            return True
+        
+        # One empty, other not
+        if result1.empty or result2.empty:
+            return False
+        
+        # Compare DataFrames (already sorted)
+        try:
+            return result1.equals(result2)
+        except Exception:
+            return False
+    
+    return False
+
+def aggregate_results_semantic_majority_vote(
+    samples_per_prompt: List[List[Dict[str, Any]]],
+    db_ids: List[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Aggregate multiple samples per prompt using majority voting based on semantic equivalence
+    (execution results) rather than syntactic string matching.
+    
+    This function executes each SQL query against its corresponding database and groups
+    queries that produce equivalent results, then selects the most frequent query by
+    semantic equivalence.
+    
+    Args:
+        samples_per_prompt: List where each element is a list of sample results for one prompt
+        db_ids: List of database IDs corresponding to each prompt. If None, will try to
+                extract from samples or use a default database path structure.
+        
+    Returns:
+        List of aggregated results, one per prompt
+    """
+    import random
+    import pandas as pd
+    
+    SPIDER_DB_PATH = f"{ROOT_PATH}/database/spider"
+    
+    aggregated_results = []
+    
+    for prompt_idx, samples in enumerate(samples_per_prompt):
+        if not samples:
+            # No samples for this prompt
+            aggregated_results.append({
+                "prompt_index": prompt_idx,
+                "prompt": "",
+                "response": None,
+                "all_responses": [],
+                "consistency_score": 0.0,
+                "response_counts": {},
+                "generation_time": 0.0,
+                "status": "error",
+                "consistency_mode": "self",
+                "num_samples": 0,
+                "models_used": [],
+                "aggregation_method": "semantic"
+            })
+            continue
+        
+        # Get database ID for this prompt
+        db_id = None
+        if db_ids and prompt_idx < len(db_ids):
+            db_id = db_ids[prompt_idx]
+        
+        # If db_id not provided, try to extract from samples
+        if not db_id:
+            for sample in samples:
+                if 'db_id' in sample:
+                    db_id = sample['db_id']
+                    break
+        
+        # Build database path
+        db_path = None
+        if db_id:
+            db_path = os.path.join(SPIDER_DB_PATH, db_id, f"{db_id}.sqlite")
+        
+        # Extract responses and execute them
+        executed_results = []
+        total_time = 0.0
+        statuses = []
+        sql_queries = []
+        
+        for sample in samples:
+            if sample['status'] == 'success' and sample['response']:
+                sql_query = post_process_sql(sample['response'])
+                sql_queries.append(sql_query)
+                total_time += sample.get('generation_time', 0.0)
+                statuses.append('success')
+                
+                # Execute SQL query if we have a database path
+                if db_path and os.path.exists(db_path):
+                    result_df, error = execute_sql_query(sql_query, db_path)
+                    if error:
+                        executed_results.append((None, error))
+                    else:
+                        executed_results.append((result_df, None))
+                else:
+                    # No database available, fall back to syntactic comparison
+                    executed_results.append((sql_query, None))  # Store query string as fallback
+            else:
+                sql_queries.append(None)
+                executed_results.append((None, sample.get('error', 'Unknown error')))
+                statuses.append(sample.get('status', 'error'))
+        
+        if not sql_queries or all(q is None for q in sql_queries):
+            # All samples failed
+            aggregated_results.append({
+                "prompt_index": prompt_idx,
+                "prompt": samples[0]['prompt'] if samples else "",
+                "response": None,
+                "all_responses": [],
+                "consistency_score": 0.0,
+                "response_counts": {},
+                "generation_time": total_time,
+                "status": "error",
+                "consistency_mode": "self",
+                "num_samples": len(samples),
+                "models_used": [],
+                "aggregation_method": "semantic"
+            })
+            continue
+        
+        # Group queries by semantic equivalence
+        # If we have database execution results, use semantic comparison
+        # Otherwise, fall back to syntactic comparison
+        use_semantic = db_path and os.path.exists(db_path) and all(
+            isinstance(r[0], pd.DataFrame) or r[0] is None for r in executed_results
+        )
+        
+        if use_semantic:
+            # Semantic grouping: group by equivalent execution results
+            # We'll compare each result with existing groups to find equivalent ones
+            semantic_groups = []  # List of (representative_result, indices_list)
+            
+            for i, (result, error) in enumerate(executed_results):
+                if error or result is None:
+                    # Failed queries: group by error message
+                    error_key = error or "Unknown error"
+                    found_group = False
+                    for group_result, group_indices in semantic_groups:
+                        if isinstance(group_result, str) and group_result.startswith("__ERROR__"):
+                            if group_result == f"__ERROR__{error_key}":
+                                group_indices.append(i)
+                                found_group = True
+                                break
+                    if not found_group:
+                        semantic_groups.append((f"__ERROR__{error_key}", [i]))
+                else:
+                    # Successful queries: compare DataFrames semantically
+                    found_group = False
+                    for group_result, group_indices in semantic_groups:
+                        if isinstance(group_result, pd.DataFrame):
+                            if compare_sql_results_semantically(result, group_result):
+                                group_indices.append(i)
+                                found_group = True
+                                break
+                    if not found_group:
+                        # Create new group with this result as representative
+                        semantic_groups.append((result, [i]))
+            
+            # Find the largest group
+            largest_group_size = max(len(indices) for _, indices in semantic_groups)
+            largest_groups = [
+                (group_result, indices) 
+                for group_result, indices in semantic_groups 
+                if len(indices) == largest_group_size
+            ]
+            
+            # Random tie-breaking among largest groups
+            selected_group_result, selected_indices = random.choice(largest_groups)
+            
+            # Get the SQL query from the first sample in the selected group
+            selected_idx = selected_indices[0]
+            selected_response = sql_queries[selected_idx]
+            
+            # Calculate consistency score
+            consistency_score = largest_group_size / len(sql_queries)
+            
+            # Build response counts (grouped by semantic equivalence)
+            response_counts = {}
+            for group_result, indices in semantic_groups:
+                # Use the first query in each group as the representative
+                rep_idx = indices[0]
+                rep_query = sql_queries[rep_idx]
+                response_counts[rep_query] = len(indices)
+            
+        else:
+            # Fallback to syntactic comparison if database not available
+            print(f"Warning: Database not available for prompt {prompt_idx}, using syntactic comparison")
+            response_counts = {}
+            for sql_query in sql_queries:
+                if sql_query:
+                    response_counts[sql_query] = response_counts.get(sql_query, 0) + 1
+            
+            # Find the most frequent response(s)
+            max_count = max(response_counts.values()) if response_counts else 0
+            most_frequent = [resp for resp, count in response_counts.items() if count == max_count]
+            
+            # Random tie-breaking
+            selected_response = random.choice(most_frequent) if most_frequent else None
+            consistency_score = max_count / len(sql_queries) if sql_queries else 0.0
+        
+        # Determine overall status
+        success_rate = sum(1 for s in statuses if s == 'success') / len(statuses) if statuses else 0.0
+        overall_status = 'success' if success_rate > 0.5 else 'error'
+        
+        aggregated_results.append({
+            "prompt_index": prompt_idx,
+            "prompt": samples[0]['prompt'],
+            "response": selected_response,
+            "all_responses": [q for q in sql_queries if q],
+            "consistency_score": consistency_score,
+            "response_counts": response_counts,
+            "generation_time": total_time / len(samples) if samples else 0.0,
+            "status": overall_status,
+            "consistency_mode": "self",
+            "num_samples": len(samples),
+            "models_used": [],
+            "aggregation_method": "semantic" if use_semantic else "syntactic_fallback"
+        })
+    
+    return aggregated_results
+
 def save_results(results: List[Dict[str, Any]], output_file: str = "pred.sql"):
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -634,8 +971,75 @@ def load_prompts_from_file(file_path: str) -> List[str]:
                 print(f"Warning: Invalid JSON on line {line_num}, skipping: {e}")
     return prompts
 
+def load_prompts_with_db_ids(file_path: str) -> tuple[List[str], List[str]]:
+    """
+    Load prompts and database IDs from a JSONL file.
+    
+    Args:
+        file_path: Path to the JSONL file
+        
+    Returns:
+        Tuple of (prompts, db_ids) where db_ids may contain None values
+        if db_id is not present in the data
+    """
+    prompts = []
+    db_ids = []
+    
+    # Try to load from gold database if db_id not in file
+    import sqlite3
+    BRONZE_DB = f"{ROOT_PATH}/database/bronze/bronze.sqlite"
+    db_id_map = {}
+    
+    try:
+        conn = sqlite3.connect(BRONZE_DB)
+        cursor = conn.cursor()
+        # Get all entries with their prompts and db_ids
+        cursor.execute("SELECT question, db_id FROM spider_dataset")
+        for question, db_id in cursor.fetchall():
+            db_id_map[question.strip().lower()] = db_id
+        conn.close()
+    except Exception as e:
+        print(f"Warning: Could not load database IDs from bronze DB: {e}")
+    
+    with open(file_path, 'r', encoding='utf-8') as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+                if 'prompt' in data:
+                    prompts.append(data['prompt'])
+                    # Try to get db_id from data, or from bronze DB
+                    if 'db_id' in data:
+                        db_ids.append(data['db_id'])
+                    elif 'question' in data:
+                        # Try to match question to get db_id
+                        question_key = data['question'].strip().lower()
+                        db_ids.append(db_id_map.get(question_key))
+                    else:
+                        # Try to extract question from prompt
+                        prompt_text = data['prompt']
+                        # Simple heuristic: first line after "###" might be the question
+                        question_match = None
+                        for line in prompt_text.split('\n'):
+                            if line.strip().startswith('###') and '?' in line:
+                                question_text = line.replace('###', '').strip()
+                                question_key = question_text.lower()
+                                db_ids.append(db_id_map.get(question_key))
+                                question_match = True
+                                break
+                        if not question_match:
+                            db_ids.append(None)
+                else:
+                    print(f"Warning: Line {line_num} missing 'prompt' field, skipping")
+            except json.JSONDecodeError as e:
+                print(f"Warning: Invalid JSON on line {line_num}, skipping: {e}")
+    
+    return prompts, db_ids
+
 def main(model_specs: List[str], strategy, template, input_file, batch_size=None, 
-         consistency_mode='none', num_samples=1, temperature=0.7):
+         consistency_mode='none', num_samples=1, temperature=0.7, max_tokens=512):
     """
     Generate predictions using nl2SQL or nl2NatSQL models with optional consistency modes.
     
@@ -648,8 +1052,8 @@ def main(model_specs: List[str], strategy, template, input_file, batch_size=None
         consistency_mode (str): Consistency strategy (none, self, cross)
         num_samples (int): Number of samples per prompt for consistency
         temperature (float): Temperature for sampling
+        max_tokens (int): Maximum tokens to generate per prompt (default: 512)
     """
-    MAX_TOKENS = 512
 
     # Validate consistency mode and num_samples combination
     if consistency_mode == 'none' and num_samples != 1:
@@ -730,7 +1134,7 @@ def main(model_specs: List[str], strategy, template, input_file, batch_size=None
             prompts=prompts,
             model=model,
             tokenizer=tokenizer,
-            max_tokens=MAX_TOKENS,
+            max_tokens=max_tokens,
             batch_size=batch_size
         )
         
@@ -758,7 +1162,7 @@ def main(model_specs: List[str], strategy, template, input_file, batch_size=None
             prompts=prompts,
             model=model,
             tokenizer=tokenizer,
-            max_tokens=MAX_TOKENS,
+            max_tokens=max_tokens,
             batch_size=batch_size,
             num_samples=num_samples,
             temperature=temperature
@@ -779,9 +1183,10 @@ def main(model_specs: List[str], strategy, template, input_file, batch_size=None
             model_specs=model_specs,
             strategy=strategy,
             template=template,
-            max_tokens=MAX_TOKENS,
+            max_tokens=max_tokens,
             batch_size=batch_size,
-            temperature=temperature
+            temperature=temperature,
+            input_file=input_file
         )
         
         # Create a directory name based on the first model (for organization)
@@ -836,16 +1241,20 @@ if __name__ == "__main__":
     
     # Define valid base model names (without :fine-tuned suffix)
     valid_models = [
-        'mlx-community/Llama-3.2-1B-Instruct-4bit',     # 1B
-        'mlx-community/Llama-3.2-3B-Instruct-4bit',     # 3B
-        'mlx-community/Phi-4-mini-reasoning-4bit',      # 3.8B
-        'Qwen/Qwen3-4B-MLX-4bit',                       # 4B
-        'mlx-community/Ministral-8B-Instruct-2410-4bit',# 8B
-        'Qwen/Qwen3-8B-MLX-4bit',                       # 8B
-        'mlx-community/phi-4-4bit',                     # 14B
-        'mlx-community/Qwen3-14B-4bit',                 # 14B
-        'mlx-community/Phi-4-reasoning-plus-4bit',      # 14B
-        'mlx-community/Phi-4-reasoning-4bit'            # 14B
+        'mlx-community/Qwen3-14B-4bit',                   # 14B
+        'mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit',# 14B
+        'mlx-community/phi-4-4bit',                       # 14B
+        'mlx-community/Ministral-8B-Instruct-2410-4bit',  # 8B
+        'mlx-community/Meta-Llama-3.1-8B-Instruct-4bit',  # 8B
+        'mlx-community/Llama-3.2-3B-Instruct-4bit',       # 3B
+        'mlx-community/Llama-3.2-1B-Instruct-4bit',       # 1B
+
+        'mlx-community/Phi-4-mini-reasoning-4bit',        # 3.8B
+        'Qwen/Qwen3-4B-MLX-4bit',                         # 4B
+        'mlx-community/DeepSeek-R1-Distill-Qwen-7B-8bit', # 7B
+        'Qwen/Qwen3-8B-MLX-4bit',                         # 8B
+        'mlx-community/Phi-4-reasoning-plus-4bit',        # 14B
+        'mlx-community/Phi-4-reasoning-4bit'              # 14B
     ]
     
     def validate_model_spec(value: str) -> str:
@@ -894,6 +1303,8 @@ if __name__ == "__main__":
                             'For "cross" mode, automatically set to number of models (one sample per model).')
     parser.add_argument('--temperature', type=float, default=0.7,
                        help='Temperature for sampling in consistency mode (default: 0.7)')
+    parser.add_argument('--max-tokens', type=int, default=512,
+                       help='Maximum tokens to generate per prompt (default: 512)')
     
     args = parser.parse_args()
     
@@ -924,4 +1335,4 @@ if __name__ == "__main__":
         )
     
     main(args.models, args.strategy, args.template, args.input_file, args.batch_size, 
-         args.consistency_mode, args.num_samples, args.temperature)
+         args.consistency_mode, args.num_samples, args.temperature, args.max_tokens)
