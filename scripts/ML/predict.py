@@ -5,6 +5,9 @@ from pathlib import Path
 from typing import List, Dict, Any
 from mlx_lm import load, batch_generate
 from dotenv import load_dotenv
+from jinja2 import Environment, FileSystemLoader
+
+from scripts.ML.schema_refinement import refine_schema_from_sql
 
 load_dotenv()
 ROOT_PATH = os.environ.get("ROOT_PATH")
@@ -332,7 +335,8 @@ def process_cross_consistent(
     max_tokens: int = 512,
     batch_size: int = None,
     temperature: float = 0.0,
-    input_file: str = None
+    input_file: str = None,
+    db_ids: List[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Process prompts with cross-consistency (multiple models, one sample each).
@@ -346,7 +350,8 @@ def process_cross_consistent(
         max_tokens: Maximum tokens to generate per prompt
         batch_size: Maximum number of prompts to process in a single batch
         temperature: Temperature for generation (can be 0.0 for deterministic)
-        input_file: Path to the input JSONL file (used to load database IDs)
+        input_file: Path to the input JSONL file (used to load database IDs if db_ids is not provided)
+        db_ids: Optional list of database IDs corresponding to each prompt
         
     Returns:
         List of aggregated results, one per prompt
@@ -422,9 +427,8 @@ def process_cross_consistent(
                 prompt_samples.append(model_results[prompt_idx])
         samples_per_prompt.append(prompt_samples)
     
-    # Load database IDs if input file is provided
-    db_ids = None
-    if input_file:
+    # Load database IDs if not explicitly provided
+    if db_ids is None and input_file:
         try:
             template_folder = template.removesuffix('.j2')
             input_file_clean = input_file.removesuffix('.jsonl')
@@ -971,6 +975,103 @@ def load_prompts_from_file(file_path: str) -> List[str]:
                 print(f"Warning: Invalid JSON on line {line_num}, skipping: {e}")
     return prompts
 
+
+def load_jsonl_records(file_path: str) -> List[Dict[str, Any]]:
+    """Load JSONL records (one JSON object per line). Empty lines are skipped."""
+    records: List[Dict[str, Any]] = []
+    with open(file_path, "r", encoding="utf-8") as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                if isinstance(obj, dict):
+                    records.append(obj)
+                else:
+                    print(f"Warning: Line {line_num} is not a JSON object, skipping")
+            except json.JSONDecodeError as e:
+                print(f"Warning: Invalid JSON on line {line_num}, skipping: {e}")
+    return records
+
+
+def get_model_dir_name(name: str) -> str:
+    """Extract model directory name, removing common prefixes."""
+    if name.startswith("mlx-community/"):
+        return name.removeprefix("mlx-community/")
+    if "/" in name:
+        return name.split("/")[-1]
+    return name
+
+
+def infer_input_base_from_presql_file(presql_file: str) -> str:
+    """Infer the {input_file} base used in output naming from a preSQL artifact filename."""
+    base = Path(presql_file).name
+    # common suffixes we may generate
+    suffixes = [
+        "_predictions_presql_detailed.jsonl",
+        "_predictions_presql.jsonl",
+        "_predictions_presql.sql",
+        "_presql_detailed.jsonl",
+        "_presql.jsonl",
+        "_presql.sql",
+        ".jsonl",
+    ]
+    for s in suffixes:
+        if base.endswith(s):
+            return base[: -len(s)]
+    # fallback: drop extension
+    return Path(base).stem
+
+
+def build_predictions_dir(strategy: str, template_folder: str, model_specs: List[str], consistency_mode: str) -> str:
+    """
+    Output folder policy:
+      - cross-consistency: .../{template}/cross{N}models/
+      - otherwise: .../{template}/{model_dir}/
+    """
+    if consistency_mode == "cross":
+        return f"{PRED_PATH}/{strategy}/{template_folder}/cross{len(model_specs)}models"
+    model_name, _ = parse_model_spec(model_specs[0])
+    return f"{PRED_PATH}/{strategy}/{template_folder}/{get_model_dir_name(model_name)}"
+
+
+def render_refined_prompts(
+    strategy: str, template: str, records: List[Dict[str, Any]], default_question_key: str = "question"
+) -> List[str]:
+    """
+    Render refined prompts for finSQL generation.
+    Requires each record to include:
+      - question
+      - simplified_ddl
+      - foreign_keys
+      - presql
+    """
+    template_base = template.removesuffix(".j2")
+    refined_template_file = f"{template_base}_refined.j2"
+    env = Environment(loader=FileSystemLoader(f"{ROOT_PATH}/data/templates/{strategy}"))
+    refined_template = env.get_template(refined_template_file)
+
+    prompts: List[str] = []
+    for rec in records:
+        question = rec.get(default_question_key) or ""
+        simplified_ddl = rec.get("simplified_ddl") or ""
+        foreign_keys = rec.get("foreign_keys") or ""
+        presql = rec.get("presql") or rec.get("preSQL") or ""
+
+        refined = refine_schema_from_sql(presql, simplified_ddl, foreign_keys)
+
+        params = {
+            "question": question,
+            "refined_simplified_ddl": refined.refined_simplified_ddl,
+            "refined_foreign_keys": refined.refined_foreign_keys,
+            # optional fields supported by some refined templates
+            "refined_cell_values": rec.get("cell_values", ""),
+            "refined_few_shot": rec.get("few_shot", ""),
+        }
+        prompts.append(refined_template.render(params))
+    return prompts
+
 def load_prompts_with_db_ids(file_path: str) -> tuple[List[str], List[str]]:
     """
     Load prompts and database IDs from a JSONL file.
@@ -1038,8 +1139,20 @@ def load_prompts_with_db_ids(file_path: str) -> tuple[List[str], List[str]]:
     
     return prompts, db_ids
 
-def main(model_specs: List[str], strategy, template, input_file, batch_size=None, 
-         consistency_mode='none', num_samples=1, temperature=0.7, max_tokens=512):
+def main(
+    model_specs: List[str],
+    strategy,
+    template,
+    input_file=None,
+    batch_size=None,
+    consistency_mode="none",
+    num_samples=1,
+    temperature=0.7,
+    max_tokens=512,
+    presql: bool = False,
+    finsql: bool = False,
+    presql_file: str = None,
+):
     """
     Generate predictions using nl2SQL or nl2NatSQL models with optional consistency modes.
     
@@ -1055,41 +1168,183 @@ def main(model_specs: List[str], strategy, template, input_file, batch_size=None
         max_tokens (int): Maximum tokens to generate per prompt (default: 512)
     """
 
-    # Validate consistency mode and num_samples combination
-    if consistency_mode == 'none' and num_samples != 1:
-        raise ValueError(
-            f"num-samples is only valid for consistency-mode 'self' or 'cross'. "
-            f"Got consistency-mode='none' with num-samples={num_samples}. "
-            f"For 'none' mode, num-samples must be 1 (default)."
-        )
-    
-    # Validate cross mode requirements
-    if consistency_mode == 'cross':
-        if len(model_specs) < 2:
-            raise ValueError(
-                f"For 'cross' mode, at least 2 models are required. "
-                f"Got {len(model_specs)} model(s)."
-            )
-        # For cross mode, num_samples automatically equals number of models
-        # (each model generates exactly one sample)
-        num_samples = len(model_specs)
-    
-    # Validate 'none' and 'self' modes have exactly one model
-    if consistency_mode in ['none', 'self'] and len(model_specs) != 1:
-        raise ValueError(
-            f"For consistency-mode '{consistency_mode}', exactly 1 model is required. "
-            f"Got {len(model_specs)} model(s)."
-        )
-    
-    # Extract single model for 'none' and 'self' modes
-    if consistency_mode in ['none', 'self']:
+    template_folder = template.removesuffix('.j2')
+    input_base = input_file.removesuffix(".jsonl") if input_file else None
+
+    # Mode selection (manual two-step)
+    if presql and finsql:
+        raise ValueError("Only one of presql or finsql can be True")
+
+    # ---- preSQL mode ----
+    if presql:
+        if not input_base:
+            raise ValueError("presql mode requires input_file")
+        data_path = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{input_base+'.jsonl'}"
+        records = load_jsonl_records(data_path)
+        prompts = [r["prompt"] for r in records if "prompt" in r]
+        if not prompts:
+            raise ValueError(f"No prompts found in {data_path}")
+
+        # preSQL always uses only the first model spec (even if user passed multiple models)
         model_spec = model_specs[0]
         model_name, use_adapter = parse_model_spec(model_spec)
-    
-    template_folder = template.removesuffix('.j2')
-    input_file = input_file.removesuffix('.jsonl')
-    data = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{input_file+'.jsonl'}"
 
+        model_dir_name = get_model_dir_name(model_name)
+        adapter_path = None
+        if use_adapter:
+            adapter_path = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model_dir_name}"
+
+        # For preSQL artifacts, pick output folder based on whether user provided a model list for cross runs.
+        # If multiple models were passed, store under cross{N}models/ for consistency with the future finSQL run.
+        output_consistency_mode = "cross" if len(model_specs) > 1 else "none"
+        out_dir = build_predictions_dir(strategy, template_folder, model_specs, output_consistency_mode)
+
+        print(f"Starting preSQL generation with {len(prompts)} prompts")
+        print(f"Model (preSQL): {model_name}{' (fine-tuned)' if use_adapter else ' (base)'}")
+        if len(model_specs) > 1:
+            print(f"Note: {len(model_specs)} models provided; preSQL will use only the FIRST model. Output folder: {out_dir}")
+
+        model, tokenizer = load_model(model_name, adapter_path)
+        results = process_batch(prompts=prompts, model=model, tokenizer=tokenizer, max_tokens=max_tokens, batch_size=batch_size)
+
+        # Attach preSQL + metadata
+        detailed = []
+        for rec, res in zip(records, results):
+            presql_text = post_process_sql(res.get("response") or "")
+            detailed.append(
+                {
+                    "prompt_index": res.get("prompt_index"),
+                    "model_spec": model_spec,
+                    "model_name": model_name,
+                    "strategy": strategy,
+                    "template": template_folder,
+                    "prompt": rec.get("prompt"),
+                    "question": rec.get("question"),
+                    "db_id": rec.get("db_id"),
+                    "simplified_ddl": rec.get("simplified_ddl"),
+                    "foreign_keys": rec.get("foreign_keys"),
+                    "presql": presql_text,
+                    "status": res.get("status"),
+                    "error": res.get("error"),
+                }
+            )
+
+        presql_sql_file = f"{out_dir}/{input_base}_predictions_presql.sql"
+        presql_jsonl_file = f"{out_dir}/{input_base}_predictions_presql_detailed.jsonl"
+
+        # Save .sql (optional convenience) and detailed JSONL
+        save_results([{"response": d["presql"]} for d in detailed], presql_sql_file)
+        save_detailed_results(detailed, presql_jsonl_file)
+        return
+
+    # ---- finSQL mode ----
+    if finsql:
+        if not presql_file:
+            raise ValueError("finsql mode requires presql_file")
+
+        records = load_jsonl_records(presql_file)
+        if not records:
+            raise ValueError(f"No records found in presql_file={presql_file}")
+
+        inferred_base = infer_input_base_from_presql_file(presql_file)
+        input_base = input_base or inferred_base
+
+        # Extract db_ids for semantic aggregation (cross-consistency)
+        db_ids = [r.get("db_id") for r in records]
+
+        refined_prompts = render_refined_prompts(strategy=strategy, template=template, records=records)
+
+        print(f"Starting finSQL generation with {len(refined_prompts)} refined prompts")
+        print(f"Consistency mode: {consistency_mode}")
+
+        # Validate consistency args for finSQL
+        if consistency_mode == "none" and num_samples != 1:
+            raise ValueError("num-samples is only valid for consistency-mode 'self' or 'cross'")
+        if consistency_mode == "cross":
+            if len(model_specs) < 2:
+                raise ValueError("For cross mode, at least 2 models are required")
+            num_samples = len(model_specs)
+        if consistency_mode in ["none", "self"] and len(model_specs) != 1:
+            raise ValueError(f"For consistency-mode '{consistency_mode}', exactly 1 model is required")
+
+        # Select output directory (new cross folder convention)
+        out_dir = build_predictions_dir(strategy, template_folder, model_specs, consistency_mode)
+
+        if consistency_mode in ["none", "self"]:
+            model_spec = model_specs[0]
+            model_name, use_adapter = parse_model_spec(model_spec)
+            model_dir_name = get_model_dir_name(model_name)
+            adapter_path = None
+            if use_adapter:
+                adapter_path = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model_dir_name}"
+
+        if consistency_mode == "none":
+            model, tokenizer = load_model(model_name, adapter_path)
+            results = process_batch(
+                prompts=refined_prompts,
+                model=model,
+                tokenizer=tokenizer,
+                max_tokens=max_tokens,
+                batch_size=batch_size,
+            )
+            output_file = f"{out_dir}/{input_base}_predictions.sql"
+            detailed_output_file = f"{out_dir}/{input_base}_predictions_finsql_detailed.jsonl"
+
+        elif consistency_mode == "self":
+            model, tokenizer = load_model(model_name, adapter_path)
+            results = process_self_consistent(
+                prompts=refined_prompts,
+                model=model,
+                tokenizer=tokenizer,
+                max_tokens=max_tokens,
+                batch_size=batch_size,
+                num_samples=num_samples,
+                temperature=temperature,
+            )
+            output_file = f"{out_dir}/{input_base}_predictions_self.sql"
+            detailed_output_file = f"{out_dir}/{input_base}_predictions_self_finsql_detailed.jsonl"
+
+        elif consistency_mode == "cross":
+            results = process_cross_consistent(
+                prompts=refined_prompts,
+                model_specs=model_specs,
+                strategy=strategy,
+                template=template,
+                max_tokens=max_tokens,
+                batch_size=batch_size,
+                temperature=temperature,
+                input_file=input_base,
+                db_ids=db_ids,
+            )
+            num_models = len(model_specs)
+            output_file = f"{out_dir}/{input_base}_predictions_cross_{num_models}models.sql"
+            detailed_output_file = f"{out_dir}/{input_base}_predictions_cross_{num_models}models_finsql_detailed.jsonl"
+
+        else:
+            raise ValueError(f"Unknown consistency mode: {consistency_mode}")
+
+        # Save final SQL in the exact same format as today + detailed jsonl
+        save_results(results, output_file)
+
+        # add presql + prompt metadata back into the finSQL detailed file
+        detailed = []
+        for rec, res in zip(records, results):
+            item = dict(rec)
+            item["finsql"] = res.get("response")
+            item["consistency_mode"] = res.get("consistency_mode", consistency_mode)
+            item["status"] = res.get("status")
+            item["generation_time"] = res.get("generation_time")
+            item["models_used"] = res.get("models_used", [])
+            item["consistency_score"] = res.get("consistency_score")
+            detailed.append(item)
+        save_detailed_results(detailed, detailed_output_file)
+        return
+
+    # ---- default behavior (backward compatible) ----
+    if not input_base:
+        raise ValueError("input_file is required when not running in finsql mode")
+
+    data = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{input_base+'.jsonl'}"
     prompts = load_prompts_from_file(data)
     
     print(f"Starting batch inference with {len(prompts)} prompts")
@@ -1107,19 +1362,10 @@ def main(model_specs: List[str], strategy, template, input_file, batch_size=None
         print(f"Temperature: {temperature}")
     print("=" * 60)
 
-    # Helper function to get model directory name (remove prefix for directory structure)
-    def get_model_dir_name(name: str) -> str:
-        """Extract model directory name, removing common prefixes"""
-        # Remove mlx-community/ prefix if present
-        if name.startswith('mlx-community/'):
-            return name.removeprefix('mlx-community/')
-        # Remove other prefixes if needed (e.g., Qwen/)
-        if '/' in name:
-            return name.split('/')[-1]
-        return name
-
     # Process based on consistency mode
     if consistency_mode == 'none':
+        model_spec = model_specs[0]
+        model_name, use_adapter = parse_model_spec(model_spec)
         model_dir_name = get_model_dir_name(model_name)
         
         # Build adapter path if needed
@@ -1140,14 +1386,16 @@ def main(model_specs: List[str], strategy, template, input_file, batch_size=None
         
         # Set output file names
         if finetuned:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_{finetuned}.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_{finetuned}_detailed.jsonl"
+            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_{finetuned}.sql"
+            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_{finetuned}_detailed.jsonl"
         else:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_detailed.jsonl"
+            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions.sql"
+            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_detailed.jsonl"
     
     elif consistency_mode == 'self':
         # Self-consistency: same model, multiple samples
+        model_spec = model_specs[0]
+        model_name, use_adapter = parse_model_spec(model_spec)
         model_dir_name = get_model_dir_name(model_name)
         
         # Build adapter path if needed
@@ -1170,11 +1418,11 @@ def main(model_specs: List[str], strategy, template, input_file, batch_size=None
         
         # Set output file names
         if finetuned:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_self_{finetuned}.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_self_{finetuned}_detailed.jsonl"
+            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_self_{finetuned}.sql"
+            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_self_{finetuned}_detailed.jsonl"
         else:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_self.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_self_detailed.jsonl"
+            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_self.sql"
+            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_self_detailed.jsonl"
     
     elif consistency_mode == 'cross':
         # Cross-consistency: multiple models, one sample each
@@ -1186,18 +1434,16 @@ def main(model_specs: List[str], strategy, template, input_file, batch_size=None
             max_tokens=max_tokens,
             batch_size=batch_size,
             temperature=temperature,
-            input_file=input_file
+            input_file=input_base
         )
-        
-        # Create a directory name based on the first model (for organization)
-        # Or use a hash/shortened identifier for multiple models
-        first_model_name, _ = parse_model_spec(model_specs[0])
-        model_dir_name = get_model_dir_name(first_model_name)
-        
+
+        # Cross-consistency output folder convention: cross{N}models/
+        model_dir_name = f"cross{len(model_specs)}models"
+
         # Output file naming for cross-consistency
         num_models = len(model_specs)
-        output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_cross_{num_models}models.sql"
-        detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_file}_predictions_cross_{num_models}models_detailed.jsonl"
+        output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_cross{num_models}models.sql"
+        detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_cross{num_models}models_detailed.jsonl"
     
     else:
         raise ValueError(f"Unknown consistency mode: {consistency_mode}")
@@ -1241,20 +1487,22 @@ if __name__ == "__main__":
     
     # Define valid base model names (without :fine-tuned suffix)
     valid_models = [
-        'mlx-community/Qwen3-14B-4bit',                   # 14B
-        'mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit',# 14B
-        'mlx-community/phi-4-4bit',                       # 14B
-        'mlx-community/Ministral-8B-Instruct-2410-4bit',  # 8B
-        'mlx-community/Meta-Llama-3.1-8B-Instruct-4bit',  # 8B
-        'mlx-community/Llama-3.2-3B-Instruct-4bit',       # 3B
-        'mlx-community/Llama-3.2-1B-Instruct-4bit',       # 1B
+        'mlx-community/Qwen3-14B-4bit',                    # 14B
+        'mlx-community/phi-4-4bit',                        # 14B
+        'mlx-community/Ministral-3-14B-Instruct-2512-4bit',# 14B
+        'mlx-community/Ministral-8B-Instruct-2410-4bit',   # 8B
+        'mlx-community/Meta-Llama-3.1-8B-Instruct-4bit',   # 8B
+        'mlx-community/Olmo-3-7B-Instruct-4bit',           # 7B
+        'mlx-community/Llama-3.2-3B-Instruct-4bit',        # 3B
 
-        'mlx-community/Phi-4-mini-reasoning-4bit',        # 3.8B
-        'Qwen/Qwen3-4B-MLX-4bit',                         # 4B
-        'mlx-community/DeepSeek-R1-Distill-Qwen-7B-8bit', # 7B
-        'Qwen/Qwen3-8B-MLX-4bit',                         # 8B
-        'mlx-community/Phi-4-reasoning-plus-4bit',        # 14B
-        'mlx-community/Phi-4-reasoning-4bit'              # 14B
+        'mlx-community/Phi-4-reasoning-plus-4bit',         # x 14B
+        'mlx-community/Phi-4-reasoning-4bit'               # x 14B
+        'mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit', # x 14B
+        'Qwen/Qwen3-8B-MLX-4bit',                          # x 8B
+        'mlx-community/DeepSeek-R1-Distill-Qwen-7B-8bit',  # x 7B
+        'Qwen/Qwen3-4B-MLX-4bit',                          # x 4B
+        'mlx-community/Phi-4-mini-reasoning-4bit',         # x 3.8B
+        'mlx-community/Llama-3.2-1B-Instruct-4bit',        # x 1B
     ]
     
     def validate_model_spec(value: str) -> str:
@@ -1286,8 +1534,13 @@ if __name__ == "__main__":
                        help='Strategy used to fine-tune')
     parser.add_argument('--template', type=str, default='template_12',
                        help='Template name to use for training data (default: template_12)')
-    parser.add_argument('--input-file', type=str, required=True,
-                       help='Input file for prompts. MUST be a jsonl file')
+    parser.add_argument('--input-file', type=str, required=False,
+                       help='Input file for prompts (training jsonl name). Required for normal mode and --presql.')
+    mode_group = parser.add_mutually_exclusive_group()
+    mode_group.add_argument('--presql', action='store_true', help='Generate intermediate preSQL and store JSONL artifacts.')
+    mode_group.add_argument('--finsql', action='store_true', help='Generate finSQL from a preSQL JSONL artifact.')
+    parser.add_argument('--presql-file', type=str, default=None,
+                       help='Path to the preSQL JSONL artifact to consume (required for --finsql).')
     parser.add_argument('--batch-size', type=int, default=None,
                        help='Batch size for processing prompts. If not specified, processes all prompts at once. Use smaller values to avoid memory issues.')
     
@@ -1307,32 +1560,49 @@ if __name__ == "__main__":
                        help='Maximum tokens to generate per prompt (default: 512)')
     
     args = parser.parse_args()
-    
-    # Validate arguments
-    if args.consistency_mode == 'none' and args.num_samples != 1:
-        parser.error(
-            f"num-samples is only valid for consistency-mode 'self' or 'cross'. "
-            f"Got consistency-mode='none' with num-samples={args.num_samples}. "
-            f"For 'none' mode, num-samples must be 1 (default)."
-        )
-    
-    # Validate cross mode requirements
-    if args.consistency_mode == 'cross':
-        if len(args.models) < 2:
-            parser.error(
-                f"For 'cross' mode, at least 2 models are required. "
-                f"Got {len(args.models)} model(s)."
-            )
-        # For cross mode, num_samples automatically equals number of models
-        # (each model generates exactly one sample)
-        args.num_samples = len(args.models)
-    
-    # Validate 'none' and 'self' modes have exactly one model
-    if args.consistency_mode in ['none', 'self'] and len(args.models) != 1:
-        parser.error(
-            f"For consistency-mode '{args.consistency_mode}', exactly 1 model is required. "
-            f"Got {len(args.models)} model(s)."
-        )
-    
-    main(args.models, args.strategy, args.template, args.input_file, args.batch_size, 
-         args.consistency_mode, args.num_samples, args.temperature, args.max_tokens)
+
+    # Mode-specific argument validation
+    if args.presql:
+        if not args.input_file:
+            parser.error("--presql requires --input-file")
+        # preSQL generation always uses only the first model; allow users to pass multiple models
+        # (intended for later cross-consistency finSQL).
+    elif args.finsql:
+        if not args.presql_file:
+            parser.error("--finsql requires --presql-file")
+        # finSQL obeys the existing consistency-mode rules
+        if args.consistency_mode == "none" and args.num_samples != 1:
+            parser.error("--num-samples is only valid for consistency-mode 'self' or 'cross'")
+        if args.consistency_mode == "cross":
+            if len(args.models) < 2:
+                parser.error("For --consistency-mode cross, at least 2 models are required")
+            args.num_samples = len(args.models)
+        if args.consistency_mode in ["none", "self"] and len(args.models) != 1:
+            parser.error(f"For consistency-mode '{args.consistency_mode}', exactly 1 model is required")
+    else:
+        # Backward compatible behavior
+        if not args.input_file:
+            parser.error("Normal mode requires --input-file")
+        if args.consistency_mode == "none" and args.num_samples != 1:
+            parser.error("--num-samples is only valid for consistency-mode 'self' or 'cross'")
+        if args.consistency_mode == "cross":
+            if len(args.models) < 2:
+                parser.error("For --consistency-mode cross, at least 2 models are required")
+            args.num_samples = len(args.models)
+        if args.consistency_mode in ["none", "self"] and len(args.models) != 1:
+            parser.error(f"For consistency-mode '{args.consistency_mode}', exactly 1 model is required")
+
+    main(
+        args.models,
+        args.strategy,
+        args.template,
+        args.input_file,
+        args.batch_size,
+        args.consistency_mode,
+        args.num_samples,
+        args.temperature,
+        args.max_tokens,
+        presql=args.presql,
+        finsql=args.finsql,
+        presql_file=args.presql_file,
+    )
