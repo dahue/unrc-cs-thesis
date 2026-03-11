@@ -303,13 +303,33 @@ def create_completions(entries, query_type="sql"):
         completions.append(entry["query"] if query_type == "sql" else entry[query_type])
     return completions
 
-def create_dataset(entries, template, strategy, skeleton_dataset=None, max_workers=None, few_shots_list=None):
+def create_dataset(
+    entries,
+    template,
+    strategy,
+    skeleton_dataset=None,
+    max_workers=None,
+    few_shots_list=None,
+    include_metadata: bool = False,
+):
     query_type = "sql" if strategy == "nl2SQL" else "natsql"
     processed_data = []
     prompts = create_prompts(entries, template, query_type, skeleton_dataset, max_workers, few_shots_list)
     completions = create_completions(entries, query_type)
-    for prompt, completion in zip(prompts, completions):
-        processed_data.append({"prompt": prompt, "completion": completion})
+    for entry, prompt, completion in zip(entries, prompts, completions):
+        item = {"prompt": prompt, "completion": completion}
+        if include_metadata:
+            # Include minimal metadata needed for downstream schema refinement and evaluation.
+            # Store rendered schema blocks (same representation used in prompts).
+            item.update(
+                {
+                    "question": entry.get("question"),
+                    "db_id": entry.get("db_id"),
+                    "simplified_ddl": get_simplified_ddl(entry),
+                    "foreign_keys": get_foreign_keys(entry),
+                }
+            )
+        processed_data.append(item)
     return processed_data
 
 def create_sql_dataset(entries):
@@ -480,7 +500,7 @@ def compute_few_shots_for_entries(entries, train_skeleton_data, max_workers=None
     print(f"✓ Few-shot examples computed in {elapsed_time:.2f} seconds (parallel processing with {max_workers} workers)")
     return few_shots
 
-def main(strategy, template_name, difficulties=None, test_limit=None, max_workers=None):
+def main(strategy, template_name, difficulties=None, test_limit=None, max_workers=None, include_metadata: bool = False):
     """
     Create dataset for either nl2SQL or nl2NatSQL models using specified template.
     
@@ -493,6 +513,8 @@ def main(strategy, template_name, difficulties=None, test_limit=None, max_worker
     """
     script_start_time = time.time()
     print(f"Starting dataset creation for {strategy} with template {template_name}")
+    if include_metadata:
+        print("Including metadata fields in JSONL outputs (question, db_id, simplified_ddl, foreign_keys)")
     if max_workers:
         print(f"Using {max_workers} worker threads for parallel processing")
     print("-" * 60)
@@ -579,10 +601,14 @@ def main(strategy, template_name, difficulties=None, test_limit=None, max_worker
     print(f"✓ Skeleton dataset created in {skeleton_time:.2f} seconds")
 
     print(f"\nCreating training dataset ({len(train_entries)} entries)...")
-    train_data = create_dataset(train_entries, template, strategy=strategy, max_workers=max_workers)
+    train_data = create_dataset(
+        train_entries, template, strategy=strategy, max_workers=max_workers, include_metadata=include_metadata
+    )
     
     print(f"\nCreating validation dataset ({len(valid_entries)} entries)...")
-    valid_data = create_dataset(valid_entries, template, strategy=strategy, max_workers=max_workers)
+    valid_data = create_dataset(
+        valid_entries, template, strategy=strategy, max_workers=max_workers, include_metadata=include_metadata
+    )
     
     # Handle few-shot caching for test dataset
     print(f"\nCreating test dataset ({len(test_entries)} entries)...")
@@ -596,7 +622,14 @@ def main(strategy, template_name, difficulties=None, test_limit=None, max_worker
     else:
         few_shots_list = cached_few_shots
     
-    test_data = create_dataset(test_entries, template, strategy=strategy, max_workers=max_workers, few_shots_list=few_shots_list)
+    test_data = create_dataset(
+        test_entries,
+        template,
+        strategy=strategy,
+        max_workers=max_workers,
+        few_shots_list=few_shots_list,
+        include_metadata=include_metadata,
+    )
 
     train_sql_data = create_sql_dataset(train_entries)
     valid_sql_data = create_sql_dataset(valid_entries)
@@ -657,5 +690,10 @@ if __name__ == "__main__":
                        help='Optional limit for number of test records to include (takes first N records)')
     parser.add_argument('--max-workers', type=int, metavar='N',
                        help='Optional maximum number of worker processes for parallel processing (default: min(32, cpu_count + 4))')
+    parser.add_argument(
+        '--include-metadata',
+        action='store_true',
+        help='Include extra fields (question, db_id, simplified_ddl, foreign_keys) in JSONL outputs for downstream processing.',
+    )
     args = parser.parse_args()
-    main(args.strategy, args.template, args.difficulty, args.test_limit, args.max_workers)
+    main(args.strategy, args.template, args.difficulty, args.test_limit, args.max_workers, args.include_metadata)
