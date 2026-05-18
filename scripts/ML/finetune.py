@@ -2,19 +2,15 @@ import os
 import subprocess
 from dotenv import load_dotenv
 
-def main(model, strategy, template, iters):
+def main(model, template, iters):
     """
-    Fine-tune either nl2SQL or nl2NatSQL models on a specified dataset.
-    
+    Fine-tune nl2SQL models on a specified dataset.
+
     Args:
         model (str): Model to fine-tune
-        strategy (str): Either 'nl2SQL' or 'nl2NatSQL'
         template (str): Template name to use for training data (default: template_11)
         iters (int): Number of training iterations
     """
-    if strategy not in ['nl2SQL', 'nl2NatSQL']:
-        raise ValueError("strategy must be either 'nl2SQL' or 'nl2NatSQL'")
-
     # Load environment variables
     load_dotenv()
     ROOT_PATH = os.environ.get("ROOT_PATH")
@@ -28,8 +24,8 @@ def main(model, strategy, template, iters):
         "mlx_lm.lora",
         "--model", model,
         "--train",
-        "--data", f"{ROOT_PATH}/data/training/{strategy}/{template_folder}",
-        "--adapter-path", f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model.removeprefix('mlx-community/')}",
+        "--data", f"{ROOT_PATH}/data/training/nl2SQL/{template_folder}",
+        "--adapter-path", f"{ROOT_PATH}/data/adapters/nl2SQL/{template_folder}/{model.split('/')[-1]}",
         "--iters", str(iters),
         "--max-seq-length", "2048", # default 2048
         "--batch-size", "2",
@@ -64,11 +60,9 @@ if __name__ == "__main__":
                             'mlx-community/Phi-4-reasoning-plus-4bit',        # 14B
                             'mlx-community/Phi-4-reasoning-4bit'              # 14B
     ])
-    parser.add_argument('--strategy', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
-                       help='Strategy used to fine-tune')
     parser.add_argument('--template', type=str, default='template_12',
                        help='Template name to use for training data (default: template_12)')
     parser.add_argument('--iters', type=int, default=100,
                        help='Number of training iterations (default: 100)')
     args = parser.parse_args()
-    main(args.model, args.strategy, args.template, args.iters)
+    main(args.model, args.template, args.iters)

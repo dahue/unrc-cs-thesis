@@ -3,7 +3,9 @@ import json
 import time
 from pathlib import Path
 from typing import List, Dict, Any
-from mlx_lm import load, batch_generate
+import mlx.core as mx
+from mlx_lm import load, batch_generate, generate
+from mlx_lm.sample_utils import make_sampler
 from dotenv import load_dotenv
 from jinja2 import Environment, FileSystemLoader
 
@@ -176,8 +178,9 @@ def process_batch(
             result["generation_time"] = avg_time_per_prompt
     
     print(f"Batch processing completed in {total_time:.2f}s")
-    print(f"Average time per prompt: {total_time/len(prompts):.2f}s")
-    
+    if prompts:
+        print(f"Average time per prompt: {total_time/len(prompts):.2f}s")
+
     return all_results
 
 def process_batch_with_sampling(
@@ -230,22 +233,14 @@ def process_batch_with_sampling(
                 )
                 
                 # Generate with specific seed and temperature
-                import mlx.core as mx
                 mx.random.seed(seed)
-                
-                # Use generate instead of batch_generate for individual samples
-                from mlx_lm import generate
-                from mlx_lm.sample_utils import make_sampler
-                sampler = make_sampler(
-                    temp=temperature
-                )
+                sampler = make_sampler(temp=temperature)
                 response = generate(
-                    model, 
-                    tokenizer, 
-                    formatted_prompt, 
-                    verbose=False, 
+                    model,
+                    tokenizer,
+                    formatted_prompt,
+                    verbose=False,
                     max_tokens=max_tokens,
-                    # temp=temperature
                     sampler=sampler
                 )
                 
@@ -330,7 +325,6 @@ def process_self_consistent(
 def process_cross_consistent(
     prompts: List[str],
     model_specs: List[str],
-    strategy: str,
     template: str,
     max_tokens: int = 512,
     batch_size: int = None,
@@ -345,7 +339,6 @@ def process_cross_consistent(
     Args:
         prompts: List of prompt strings to process
         model_specs: List of model specifications (can include :fine-tuned suffix)
-        strategy: Strategy used (nl2SQL or nl2NatSQL)
         template: Template name (used for adapter paths)
         max_tokens: Maximum tokens to generate per prompt
         batch_size: Maximum number of prompts to process in a single batch
@@ -361,16 +354,7 @@ def process_cross_consistent(
     print(f"Starting cross-consistency processing with {len(model_specs)} models")
     
     template_folder = template.removesuffix('.j2')
-    
-    # Helper function to get model directory name
-    def get_model_dir_name(name: str) -> str:
-        """Extract model directory name, removing common prefixes"""
-        if name.startswith('mlx-community/'):
-            return name.removeprefix('mlx-community/')
-        if '/' in name:
-            return name.split('/')[-1]
-        return name
-    
+
     # Store results from each model
     all_model_results = []
     model_names_list = []
@@ -387,7 +371,7 @@ def process_cross_consistent(
         
         adapter_path = None
         if use_adapter:
-            adapter_path = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{get_model_dir_name(model_name)}"
+            adapter_path = f"{ROOT_PATH}/data/adapters/nl2SQL/{template_folder}/{get_model_dir_name(model_name)}"
         
         model, tokenizer = load_model(model_name, adapter_path)
         
@@ -430,9 +414,8 @@ def process_cross_consistent(
     # Load database IDs if not explicitly provided
     if db_ids is None and input_file:
         try:
-            template_folder = template.removesuffix('.j2')
             input_file_clean = input_file.removesuffix('.jsonl')
-            data_path = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{input_file_clean+'.jsonl'}"
+            data_path = f"{ROOT_PATH}/data/training/nl2SQL/{template_folder}/{input_file_clean+'.jsonl'}"
             _, db_ids = load_prompts_with_db_ids(data_path)
             print(f"Loaded database IDs for {len([d for d in db_ids if d])} prompts")
         except Exception as e:
@@ -481,9 +464,9 @@ def post_process_sql(sql_text: str) -> str:
     
     import re
     
-    # Step 1: If there's a `</think>` tag, extract everything after it
-    if '`</think>`' in sql_text:
-        parts = sql_text.split('`</think>`', 1)
+    # Step 1: If there's a </think> tag, extract everything after it
+    if '</think>' in sql_text:
+        parts = sql_text.split('</think>', 1)
         if len(parts) > 1:
             sql_text = parts[1].strip()
     
@@ -527,9 +510,9 @@ def post_process_sql(sql_text: str) -> str:
             sql_text = sql_text[len(prefix):].strip()
             break
     
-    # Remove trailing punctuation that's not part of SQL
-    sql_text = sql_text.rstrip('.;')
-    
+    # Remove trailing dots that are not part of SQL
+    sql_text = sql_text.rstrip('.')
+
     # Remove semicolons from the SQL text
     sql_text = sql_text.replace(';', '')
     
@@ -655,33 +638,29 @@ def execute_sql_query(sql_query: str, db_path: str) -> tuple[Any, str]:
     if not os.path.exists(db_path):
         return None, f"Database file not found: {db_path}"
     
+    conn = None
     try:
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
-        
-        # Execute query
+
         cursor.execute(sql_query)
-        
-        # Get column names
+
         columns = [desc[0] for desc in cursor.description] if cursor.description else []
-        
-        # Fetch all rows
         rows = cursor.fetchall()
-        
-        # Create DataFrame
+
         if columns:
             df = pd.DataFrame(rows, columns=columns)
-            # Sort by all columns for consistent comparison
             df = df.sort_values(by=columns, axis=0).reset_index(drop=True)
         else:
-            # For queries like INSERT, UPDATE, DELETE that return no rows
             df = pd.DataFrame()
-        
-        conn.close()
+
         return df, None
-        
+
     except Exception as e:
         return None, str(e)
+    finally:
+        if conn is not None:
+            conn.close()
 
 def compare_sql_results_semantically(result1: Any, result2: Any) -> bool:
     """
@@ -761,7 +740,7 @@ def aggregate_results_semantic_majority_vote(
                 "response_counts": {},
                 "generation_time": 0.0,
                 "status": "error",
-                "consistency_mode": "self",
+                "consistency_mode": "cross",
                 "num_samples": 0,
                 "models_used": [],
                 "aggregation_method": "semantic"
@@ -824,7 +803,7 @@ def aggregate_results_semantic_majority_vote(
                 "response_counts": {},
                 "generation_time": total_time,
                 "status": "error",
-                "consistency_mode": "self",
+                "consistency_mode": "cross",
                 "num_samples": len(samples),
                 "models_used": [],
                 "aggregation_method": "semantic"
@@ -887,13 +866,14 @@ def aggregate_results_semantic_majority_vote(
             # Calculate consistency score
             consistency_score = largest_group_size / len(sql_queries)
             
-            # Build response counts (grouped by semantic equivalence)
+            # Build response counts (grouped by semantic equivalence).
+            # Failed queries use a unique sentinel key to avoid None-key collisions.
             response_counts = {}
-            for group_result, indices in semantic_groups:
-                # Use the first query in each group as the representative
+            for group_idx, (group_result, indices) in enumerate(semantic_groups):
                 rep_idx = indices[0]
                 rep_query = sql_queries[rep_idx]
-                response_counts[rep_query] = len(indices)
+                key = rep_query if rep_query is not None else f"__failed_group_{group_idx}__"
+                response_counts[key] = len(indices)
             
         else:
             # Fallback to syntactic comparison if database not available
@@ -924,7 +904,7 @@ def aggregate_results_semantic_majority_vote(
             "response_counts": response_counts,
             "generation_time": total_time / len(samples) if samples else 0.0,
             "status": overall_status,
-            "consistency_mode": "self",
+            "consistency_mode": "cross",
             "num_samples": len(samples),
             "models_used": [],
             "aggregation_method": "semantic" if use_semantic else "syntactic_fallback"
@@ -958,7 +938,7 @@ def save_detailed_results(results: List[Dict[str, Any]], output_file: str = "pre
     print(f"Detailed results saved to {output_file}")
 
 def load_prompts_from_file(file_path: str) -> List[str]:
-    """Load prompts from a text file, JSON file, or JSONL file"""
+    """Load prompts from a JSONL file. Each line must be a JSON object with a 'prompt' key."""
     prompts = []
     with open(file_path, 'r', encoding='utf-8') as f:
         for line_num, line in enumerate(f, 1):
@@ -1024,20 +1004,20 @@ def infer_input_base_from_presql_file(presql_file: str) -> str:
     return Path(base).stem
 
 
-def build_predictions_dir(strategy: str, template_folder: str, model_specs: List[str], consistency_mode: str) -> str:
+def build_predictions_dir(template_folder: str, model_specs: List[str], consistency_mode: str) -> str:
     """
     Output folder policy:
       - cross-consistency: .../{template}/cross{N}models/
       - otherwise: .../{template}/{model_dir}/
     """
     if consistency_mode == "cross":
-        return f"{PRED_PATH}/{strategy}/{template_folder}/cross{len(model_specs)}models"
+        return f"{PRED_PATH}/nl2SQL/{template_folder}/cross{len(model_specs)}models"
     model_name, _ = parse_model_spec(model_specs[0])
-    return f"{PRED_PATH}/{strategy}/{template_folder}/{get_model_dir_name(model_name)}"
+    return f"{PRED_PATH}/nl2SQL/{template_folder}/{get_model_dir_name(model_name)}"
 
 
 def render_refined_prompts(
-    strategy: str, template: str, records: List[Dict[str, Any]], default_question_key: str = "question"
+    template: str, records: List[Dict[str, Any]], default_question_key: str = "question"
 ) -> List[str]:
     """
     Render refined prompts for finSQL generation.
@@ -1049,7 +1029,7 @@ def render_refined_prompts(
     """
     template_base = template.removesuffix(".j2")
     refined_template_file = f"{template_base}_refined.j2"
-    env = Environment(loader=FileSystemLoader(f"{ROOT_PATH}/data/templates/{strategy}"))
+    env = Environment(loader=FileSystemLoader(f"{ROOT_PATH}/data/templates/nl2SQL"))
     refined_template = env.get_template(refined_template_file)
 
     prompts: List[str] = []
@@ -1123,9 +1103,9 @@ def load_prompts_with_db_ids(file_path: str) -> tuple[List[str], List[str]]:
                         prompt_text = data['prompt']
                         # Simple heuristic: first line after "###" might be the question
                         question_match = None
-                        for line in prompt_text.split('\n'):
-                            if line.strip().startswith('###') and '?' in line:
-                                question_text = line.replace('###', '').strip()
+                        for prompt_line in prompt_text.split('\n'):
+                            if prompt_line.strip().startswith('###') and '?' in prompt_line:
+                                question_text = prompt_line.replace('###', '').strip()
                                 question_key = question_text.lower()
                                 db_ids.append(db_id_map.get(question_key))
                                 question_match = True
@@ -1141,7 +1121,6 @@ def load_prompts_with_db_ids(file_path: str) -> tuple[List[str], List[str]]:
 
 def main(
     model_specs: List[str],
-    strategy,
     template,
     input_file=None,
     batch_size=None,
@@ -1154,11 +1133,10 @@ def main(
     presql_file: str = None,
 ):
     """
-    Generate predictions using nl2SQL or nl2NatSQL models with optional consistency modes.
-    
+    Generate predictions using nl2SQL models with optional consistency modes.
+
     Args:
         model_specs (List[str]): List of model specifications in format "model_name" or "model_name:fine-tuned"
-        strategy (str): Strategy used (nl2SQL or nl2NatSQL)
         template (str): Template name to use
         input_file (str): Input file for prompts
         batch_size (int): Batch size for processing
@@ -1179,7 +1157,7 @@ def main(
     if presql:
         if not input_base:
             raise ValueError("presql mode requires input_file")
-        data_path = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{input_base+'.jsonl'}"
+        data_path = f"{ROOT_PATH}/data/training/nl2SQL/{template_folder}/{input_base+'.jsonl'}"
         records = load_jsonl_records(data_path)
         prompts = [r["prompt"] for r in records if "prompt" in r]
         if not prompts:
@@ -1192,12 +1170,12 @@ def main(
         model_dir_name = get_model_dir_name(model_name)
         adapter_path = None
         if use_adapter:
-            adapter_path = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model_dir_name}"
+            adapter_path = f"{ROOT_PATH}/data/adapters/nl2SQL/{template_folder}/{model_dir_name}"
 
         # For preSQL artifacts, pick output folder based on whether user provided a model list for cross runs.
         # If multiple models were passed, store under cross{N}models/ for consistency with the future finSQL run.
         output_consistency_mode = "cross" if len(model_specs) > 1 else "none"
-        out_dir = build_predictions_dir(strategy, template_folder, model_specs, output_consistency_mode)
+        out_dir = build_predictions_dir(template_folder, model_specs, output_consistency_mode)
 
         print(f"Starting preSQL generation with {len(prompts)} prompts")
         print(f"Model (preSQL): {model_name}{' (fine-tuned)' if use_adapter else ' (base)'}")
@@ -1216,7 +1194,7 @@ def main(
                     "prompt_index": res.get("prompt_index"),
                     "model_spec": model_spec,
                     "model_name": model_name,
-                    "strategy": strategy,
+                    "strategy": "nl2SQL",
                     "template": template_folder,
                     "prompt": rec.get("prompt"),
                     "question": rec.get("question"),
@@ -1252,7 +1230,7 @@ def main(
         # Extract db_ids for semantic aggregation (cross-consistency)
         db_ids = [r.get("db_id") for r in records]
 
-        refined_prompts = render_refined_prompts(strategy=strategy, template=template, records=records)
+        refined_prompts = render_refined_prompts(template=template, records=records)
 
         print(f"Starting finSQL generation with {len(refined_prompts)} refined prompts")
         print(f"Consistency mode: {consistency_mode}")
@@ -1268,7 +1246,7 @@ def main(
             raise ValueError(f"For consistency-mode '{consistency_mode}', exactly 1 model is required")
 
         # Select output directory (new cross folder convention)
-        out_dir = build_predictions_dir(strategy, template_folder, model_specs, consistency_mode)
+        out_dir = build_predictions_dir(template_folder, model_specs, consistency_mode)
 
         if consistency_mode in ["none", "self"]:
             model_spec = model_specs[0]
@@ -1276,7 +1254,7 @@ def main(
             model_dir_name = get_model_dir_name(model_name)
             adapter_path = None
             if use_adapter:
-                adapter_path = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model_dir_name}"
+                adapter_path = f"{ROOT_PATH}/data/adapters/nl2SQL/{template_folder}/{model_dir_name}"
 
         if consistency_mode == "none":
             model, tokenizer = load_model(model_name, adapter_path)
@@ -1308,7 +1286,6 @@ def main(
             results = process_cross_consistent(
                 prompts=refined_prompts,
                 model_specs=model_specs,
-                strategy=strategy,
                 template=template,
                 max_tokens=max_tokens,
                 batch_size=batch_size,
@@ -1344,7 +1321,7 @@ def main(
     if not input_base:
         raise ValueError("input_file is required when not running in finsql mode")
 
-    data = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{input_base+'.jsonl'}"
+    data = f"{ROOT_PATH}/data/training/nl2SQL/{template_folder}/{input_base+'.jsonl'}"
     prompts = load_prompts_from_file(data)
     
     print(f"Starting batch inference with {len(prompts)} prompts")
@@ -1354,7 +1331,8 @@ def main(
         print(f"Number of samples: {num_samples} (one per model)")
         print(f"Models: {', '.join([parse_model_spec(ms)[0] for ms in model_specs])}")
     elif consistency_mode in ['none', 'self']:
-        print(f"Model: {model_name}{' (fine-tuned)' if use_adapter else ' (base)'}")
+        _name, _ft = parse_model_spec(model_specs[0])
+        print(f"Model: {_name}{' (fine-tuned)' if _ft else ' (base)'}")
     if consistency_mode == 'self':
         print(f"Number of samples: {num_samples}")
         print(f"Temperature: {temperature}")
@@ -1372,7 +1350,7 @@ def main(
         finetuned = 'finetuned' if use_adapter else ''
         adapter_path = None
         if use_adapter:
-            adapter_path = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model_dir_name}"
+            adapter_path = f"{ROOT_PATH}/data/adapters/nl2SQL/{template_folder}/{model_dir_name}"
         # Standard processing
         model, tokenizer = load_model(model_name, adapter_path)
         
@@ -1386,23 +1364,23 @@ def main(
         
         # Set output file names
         if finetuned:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_{finetuned}.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_{finetuned}_detailed.jsonl"
+            output_file = f"{PRED_PATH}/nl2SQL/{template_folder}/{model_dir_name}/{input_base}_predictions_{finetuned}.sql"
+            detailed_output_file = f"{PRED_PATH}/nl2SQL/{template_folder}/{model_dir_name}/{input_base}_predictions_{finetuned}_detailed.jsonl"
         else:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_detailed.jsonl"
-    
+            output_file = f"{PRED_PATH}/nl2SQL/{template_folder}/{model_dir_name}/{input_base}_predictions.sql"
+            detailed_output_file = f"{PRED_PATH}/nl2SQL/{template_folder}/{model_dir_name}/{input_base}_predictions_detailed.jsonl"
+
     elif consistency_mode == 'self':
         # Self-consistency: same model, multiple samples
         model_spec = model_specs[0]
         model_name, use_adapter = parse_model_spec(model_spec)
         model_dir_name = get_model_dir_name(model_name)
-        
+
         # Build adapter path if needed
         finetuned = 'finetuned' if use_adapter else ''
         adapter_path = None
         if use_adapter:
-            adapter_path = f"{ROOT_PATH}/data/adapters/{strategy}/{template_folder}/{model_dir_name}"
+            adapter_path = f"{ROOT_PATH}/data/adapters/nl2SQL/{template_folder}/{model_dir_name}"
         
         model, tokenizer = load_model(model_name, adapter_path)
         
@@ -1418,18 +1396,17 @@ def main(
         
         # Set output file names
         if finetuned:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_self_{finetuned}.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_self_{finetuned}_detailed.jsonl"
+            output_file = f"{PRED_PATH}/nl2SQL/{template_folder}/{model_dir_name}/{input_base}_predictions_self_{finetuned}.sql"
+            detailed_output_file = f"{PRED_PATH}/nl2SQL/{template_folder}/{model_dir_name}/{input_base}_predictions_self_{finetuned}_detailed.jsonl"
         else:
-            output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_self.sql"
-            detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_self_detailed.jsonl"
-    
+            output_file = f"{PRED_PATH}/nl2SQL/{template_folder}/{model_dir_name}/{input_base}_predictions_self.sql"
+            detailed_output_file = f"{PRED_PATH}/nl2SQL/{template_folder}/{model_dir_name}/{input_base}_predictions_self_detailed.jsonl"
+
     elif consistency_mode == 'cross':
         # Cross-consistency: multiple models, one sample each
         results = process_cross_consistent(
             prompts=prompts,
             model_specs=model_specs,
-            strategy=strategy,
             template=template,
             max_tokens=max_tokens,
             batch_size=batch_size,
@@ -1442,8 +1419,8 @@ def main(
 
         # Output file naming for cross-consistency
         num_models = len(model_specs)
-        output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_cross{num_models}models.sql"
-        detailed_output_file = f"{PRED_PATH}/{strategy}/{template_folder}/{model_dir_name}/{input_base}_predictions_cross{num_models}models_detailed.jsonl"
+        output_file = f"{PRED_PATH}/nl2SQL/{template_folder}/{model_dir_name}/{input_base}_predictions_cross{num_models}models.sql"
+        detailed_output_file = f"{PRED_PATH}/nl2SQL/{template_folder}/{model_dir_name}/{input_base}_predictions_cross{num_models}models_detailed.jsonl"
     
     else:
         raise ValueError(f"Unknown consistency mode: {consistency_mode}")
@@ -1476,14 +1453,15 @@ def main(
     print(f"Successful: {successful}")
     print(f"Failed: {failed}")
     print(f"Total time: {total_time:.2f}s")
-    print(f"Average time per prompt: {total_time/len(prompts):.2f}s")
+    if prompts:
+        print(f"Average time per prompt: {total_time/len(prompts):.2f}s")
     print(f"Results saved to {output_file}")
     print(f"Detailed results saved to {detailed_output_file}")
     print(consistency_stats)
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description='Batch inference using nl2SQL or nl2NatSQL models')
+    parser = argparse.ArgumentParser(description='Batch inference using nl2SQL models')
     
     # Define valid base model names (without :fine-tuned suffix)
     valid_models = [
@@ -1496,7 +1474,7 @@ if __name__ == "__main__":
         'mlx-community/Llama-3.2-3B-Instruct-4bit',        # 3B
 
         'mlx-community/Phi-4-reasoning-plus-4bit',         # x 14B
-        'mlx-community/Phi-4-reasoning-4bit'               # x 14B
+        'mlx-community/Phi-4-reasoning-4bit',              # x 14B
         'mlx-community/DeepSeek-R1-Distill-Qwen-14B-4bit', # x 14B
         'Qwen/Qwen3-8B-MLX-4bit',                          # x 8B
         'mlx-community/DeepSeek-R1-Distill-Qwen-7B-8bit',  # x 7B
@@ -1530,8 +1508,6 @@ if __name__ == "__main__":
                             'For multiple models: --models model1 model2 model3. '
                             'Examples: --models mlx-community/Llama-3.2-3B-Instruct-4bit or '
                             '--models mlx-community/Llama-3.2-1B-Instruct-4bit mlx-community/Llama-3.2-3B-Instruct-4bit')
-    parser.add_argument('--strategy', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
-                       help='Strategy used to fine-tune')
     parser.add_argument('--template', type=str, default='template_12',
                        help='Template name to use for training data (default: template_12)')
     parser.add_argument('--input-file', type=str, required=False,
@@ -1594,7 +1570,6 @@ if __name__ == "__main__":
 
     main(
         args.models,
-        args.strategy,
         args.template,
         args.input_file,
         args.batch_size,

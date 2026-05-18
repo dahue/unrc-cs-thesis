@@ -306,13 +306,12 @@ def create_completions(entries, query_type="sql"):
 def create_dataset(
     entries,
     template,
-    strategy,
     skeleton_dataset=None,
     max_workers=None,
     few_shots_list=None,
     include_metadata: bool = False,
 ):
-    query_type = "sql" if strategy == "nl2SQL" else "natsql"
+    query_type = "sql"
     processed_data = []
     prompts = create_prompts(entries, template, query_type, skeleton_dataset, max_workers, few_shots_list)
     completions = create_completions(entries, query_type)
@@ -500,27 +499,23 @@ def compute_few_shots_for_entries(entries, train_skeleton_data, max_workers=None
     print(f"✓ Few-shot examples computed in {elapsed_time:.2f} seconds (parallel processing with {max_workers} workers)")
     return few_shots
 
-def main(strategy, template_name, difficulties=None, test_limit=None, max_workers=None, include_metadata: bool = False):
+def main(template_name, difficulties=None, test_limit=None, max_workers=None, include_metadata: bool = False):
     """
-    Create dataset for either nl2SQL or nl2NatSQL models using specified template.
-    
+    Create dataset for nl2SQL models using specified template.
+
     Args:
-        strategy (str): Either 'nl2SQL' or 'nl2NatSQL'
         template_name (str): Template name (e.g., 'template_00' or 'template_00.j2')
         difficulties (list): Optional list of difficulty levels to filter by ('easy', 'medium', 'hard', 'extra')
         test_limit (int): Optional limit for number of test records to include
         max_workers (int): Optional maximum number of worker processes for parallel processing
     """
     script_start_time = time.time()
-    print(f"Starting dataset creation for {strategy} with template {template_name}")
+    print(f"Starting dataset creation with template {template_name}")
     if include_metadata:
         print("Including metadata fields in JSONL outputs (question, db_id, simplified_ddl, foreign_keys)")
     if max_workers:
         print(f"Using {max_workers} worker threads for parallel processing")
     print("-" * 60)
-    if strategy not in ['nl2SQL', 'nl2NatSQL']:
-        raise ValueError("strategy must be either 'nl2SQL' or 'nl2NatSQL'")
-    
     # Validate difficulties parameter
     valid_difficulties = ['easy', 'medium', 'hard', 'extra']
     if difficulties is not None:
@@ -586,7 +581,7 @@ def main(strategy, template_name, difficulties=None, test_limit=None, max_worker
     template_file = template_name if template_name.endswith('.j2') else f"{template_name}.j2"
     
     # Load template
-    env = Environment(loader=FileSystemLoader(f'{ROOT_PATH}/data/templates/{strategy}'))
+    env = Environment(loader=FileSystemLoader(f'{ROOT_PATH}/data/templates/nl2SQL'))
     template = env.get_template(template_file)
 
     # Apply test_limit if specified
@@ -602,30 +597,29 @@ def main(strategy, template_name, difficulties=None, test_limit=None, max_worker
 
     print(f"\nCreating training dataset ({len(train_entries)} entries)...")
     train_data = create_dataset(
-        train_entries, template, strategy=strategy, max_workers=max_workers, include_metadata=include_metadata
+        train_entries, template, max_workers=max_workers, include_metadata=include_metadata
     )
-    
+
     print(f"\nCreating validation dataset ({len(valid_entries)} entries)...")
     valid_data = create_dataset(
-        valid_entries, template, strategy=strategy, max_workers=max_workers, include_metadata=include_metadata
+        valid_entries, template, max_workers=max_workers, include_metadata=include_metadata
     )
-    
+
     # Handle few-shot caching for test dataset
     print(f"\nCreating test dataset ({len(test_entries)} entries)...")
     cache_key = generate_cache_key(difficulties, test_limit)
     cached_few_shots = load_few_shot_cache(cache_key, test_entries)
-    
+
     if cached_few_shots is None:
         # Compute few-shots and cache them
         few_shots_list = compute_few_shots_for_entries(test_entries, test_skeleton_data, max_workers)
         save_few_shot_cache(cache_key, test_entries, few_shots_list)
     else:
         few_shots_list = cached_few_shots
-    
+
     test_data = create_dataset(
         test_entries,
         template,
-        strategy=strategy,
         max_workers=max_workers,
         few_shots_list=few_shots_list,
         include_metadata=include_metadata,
@@ -651,7 +645,7 @@ def main(strategy, template_name, difficulties=None, test_limit=None, max_worker
             for query in data:
                 f.write(query + "\n")
 
-    folder_prefix = f"{ROOT_PATH}/data/training/{strategy}/{template_name.removesuffix('.j2')}/"
+    folder_prefix = f"{ROOT_PATH}/data/training/nl2SQL/{template_name.removesuffix('.j2')}/"
     write_jsonl(train_data, folder_prefix+'train.jsonl')
     write_jsonl(test_data, folder_prefix+'test.jsonl')
     write_jsonl(valid_data, folder_prefix+'valid.jsonl')
@@ -679,9 +673,7 @@ def main(strategy, template_name, difficulties=None, test_limit=None, max_worker
 
 if __name__ == "__main__":
     import argparse
-    parser = argparse.ArgumentParser(description='Create dataset for nl2SQL or nl2NatSQL')
-    parser.add_argument('--strategy', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
-                       help='Type of model to create dataset for')
+    parser = argparse.ArgumentParser(description='Create dataset for nl2SQL')
     parser.add_argument('--template', type=str, required=True,
                        help='Name of the template file without .j2 extension')
     parser.add_argument('--difficulty', type=str, nargs='*', choices=['easy', 'medium', 'hard', 'extra'],
@@ -696,4 +688,4 @@ if __name__ == "__main__":
         help='Include extra fields (question, db_id, simplified_ddl, foreign_keys) in JSONL outputs for downstream processing.',
     )
     args = parser.parse_args()
-    main(args.strategy, args.template, args.difficulty, args.test_limit, args.max_workers, args.include_metadata)
+    main(args.template, args.difficulty or None, args.test_limit, args.max_workers, args.include_metadata)

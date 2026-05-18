@@ -33,7 +33,8 @@ if [ -f "$ZIP_FILE" ]; then
   echo "✅ spider_data is ready."
 else
   echo "⬇️ Downloading spider_data.zip..."
-  wget -O "$ZIP_FILE" "https://drive.usercontent.google.com/download?id=1403EGqzIDoHMdQF4c9Bkyl7dZLZ5Wt6J&export=download&authuser=0&confirm=t&uuid=c519429f-e190-4024-9db5-5500dd9f73de&at=ALoNOgmVI-vAWDoXBUn2D2Ezy8Fy:1747082984773"
+  # Use --no-check-certificate when behind corporate/managed SSL (e.g. Kandji) that wget doesn't trust
+  wget --no-check-certificate -O "$ZIP_FILE" "https://drive.usercontent.google.com/download?id=1403EGqzIDoHMdQF4c9Bkyl7dZLZ5Wt6J&export=download&authuser=0&confirm=t&uuid=c519429f-e190-4024-9db5-5500dd9f73de&at=ALoNOgmVI-vAWDoXBUn2D2Ezy8Fy:1747082984773"
   echo "📦 Extracting spider_data.zip..."
   unzip "$ZIP_FILE" -d $TMP_DIR/
   rm -rf "$TMP_DIR/__MACOSX"
@@ -94,26 +95,20 @@ else
 fi
 echo ""
 
-# Install Python dependencies
-echo "⬇️ Installing Python dependencies..."
-pip install -r requirements.txt
-echo "✅ Done."
-echo ""
-
 # Populate Bronze tables
 echo "🐍 Populate Bronze tables..."
-python scripts/pipeline/ingest_bronze.py
+uv run python scripts/pipeline/ingest_bronze.py
 echo "✅ Done."
 echo ""
 
 # Transform Bronze to Silver tables
 echo "🐍 Transform Bronze to Silver tables..."
-python scripts/pipeline/bronze_to_silver.py
+uv run python scripts/pipeline/bronze_to_silver.py
 echo "✅ Done."
 echo ""
 
 # Transform Silver to Gold tables
 echo "🐍 Transform Silver to Gold tables..."
-python scripts/pipeline/silver_to_gold.py
+uv run python scripts/pipeline/silver_to_gold.py
 echo "✅ Done."
 echo ""

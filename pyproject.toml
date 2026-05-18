@@ -1,0 +1,23 @@
+[project]
+name = "unrc-cs-thesis"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12.9"
+dependencies = [
+    "dotenv==0.9.9",
+    "editdistance==0.8.1",
+    "huggingface-hub>=1.2.1,<2.0",
+    "jinja2==3.1.6",
+    "mlx==0.31.2",
+    "mlx-lm==0.31.3",
+    "nbdime==4.0.2",
+    "nltk==3.9.1",
+    "pandas==2.2.3",
+    "spacy[apple]==3.8.14",
+    "spider",
+    "sqlglot==23.11.2",
+]
+
+[tool.uv.sources]
+spider = { git = "https://github.com/dahue/spider-benchmark.git", rev = "main" }

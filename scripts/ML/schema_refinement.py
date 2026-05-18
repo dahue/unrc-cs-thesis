@@ -35,9 +35,9 @@ def extract_referenced_tables_from_sql(sql: str) -> Tuple[Set[str], Optional[str
         # Collect CTE names so we can avoid counting them as base tables
         cte_names: Set[str] = set()
         for cte in tree.find_all(exp.CTE):
-            alias = getattr(cte, "alias", None)
-            if alias and getattr(alias, "this", None):
-                cte_names.add(_normalize_identifier(alias.this.name))
+            alias = cte.alias  # already a plain str on exp.Expression
+            if alias:
+                cte_names.add(_normalize_identifier(alias))
 
         tables: Set[str] = set()
         for t in tree.find_all(exp.Table):
