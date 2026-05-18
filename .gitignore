@@ -3,8 +3,10 @@ database/spider/
 data/adapters/
 .ipynb_checkpoints/
 __pycache__/
+.venv/
 
 # Ignore files
+CLAUDE.md
 .DS_Store
 .env
 *.json
@@ -17,7 +19,6 @@ __pycache__/
 *.sqlite
 
 # DON'T ignore:
-!requirements.txt
 !database/bronze/schema.sql
 !database/silver/schema.sql
 !database/gold/schema.sql

@@ -14,7 +14,7 @@ if not ROOT_PATH:
     raise ValueError("ROOT_PATH environment variable not set. Please set it in your .env file.")
 
 
-def main(model, strategy, template, predict_file):
+def main(model, template, predict_file):
     BRONZE_DB = f"{ROOT_PATH}/database/bronze/bronze.sqlite"
 
     conn_bronze = sqlite3.connect(BRONZE_DB)
@@ -55,23 +55,23 @@ def main(model, strategy, template, predict_file):
     
     # Handle both '_predictions_' and '_predictions' patterns
     if '_predictions_' in predict_file:
-        gold_file, finetuned = predict_file.split('_predictions_')
+        gold_file, finetuned = predict_file.split('_predictions_', 1)
     elif '_predictions' in predict_file:
         gold_file = predict_file.split('_predictions')[0]
         finetuned = ''
     else:
         raise ValueError(f"Invalid prediction file format: {predict_file}. Expected format: 'filename_predictions[_finetuned].sql'")
     DB_DIR = f"{ROOT_PATH}/database/spider"
-    GOLD = f"{ROOT_PATH}/data/training/{strategy}/{template_folder}/{gold_file+'.sql'}"
+    GOLD = f"{ROOT_PATH}/data/training/nl2SQL/{template_folder}/{gold_file+'.sql'}"
     # Extract model name (last part after splitting by '/')
     model_name = model.split('/')[-1]
-    PREDICT = f"{ROOT_PATH}/data/predictions/{strategy}/{template_folder}/{model_name}/{predict_file+'.sql'}"
+    PREDICT = f"{ROOT_PATH}/data/predictions/nl2SQL/{template_folder}/{model_name}/{predict_file+'.sql'}"
     ETYPE = "all" # all, easy, medium, hard
 
     if finetuned:
-        output_file=f"{ROOT_PATH}/data/benchmark/{strategy}/{template_folder}/{model_name}/{gold_file}_benchmark_{finetuned}.txt"
+        output_file=f"{ROOT_PATH}/data/benchmark/nl2SQL/{template_folder}/{model_name}/{gold_file}_benchmark_{finetuned}.txt"
     else:
-        output_file=f"{ROOT_PATH}/data/benchmark/{strategy}/{template_folder}/{model_name}/{gold_file}_benchmark.txt"
+        output_file=f"{ROOT_PATH}/data/benchmark/nl2SQL/{template_folder}/{model_name}/{gold_file}_benchmark.txt"
 
     output_path = Path(output_file)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -84,19 +84,19 @@ def main(model, strategy, template, predict_file):
     with open(output_file, 'w') as f:
         original_stdout = sys.stdout
         sys.stdout = f
-        sp.evaluate(gold=GOLD , predict=PREDICT, db_dir=DB_DIR, etype=ETYPE, kmaps=KMAPS)
-        sys.stdout = original_stdout
+        try:
+            sp.evaluate(gold=GOLD, predict=PREDICT, db_dir=DB_DIR, etype=ETYPE, kmaps=KMAPS)
+        finally:
+            sys.stdout = original_stdout
     
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description='Benchmark nl2SQL or nl2NatSQL models')
     parser.add_argument('--model', type=str, required=True,
                        help='Model to fine-tune')
-    parser.add_argument('--strategy', type=str, required=True, choices=['nl2SQL', 'nl2NatSQL'],
-                       help='Type of model to create dataset for')
     parser.add_argument('--template', type=str, required=True,
-                       help='Name of the template file without')
+                       help='Name of the template file without .j2 extension')
     parser.add_argument('--prediction-file', type=str, required=True,
                        help='Input file for predicted queries. MUST be a sql file')
     args = parser.parse_args()
-    main(args.model, args.strategy, args.template, args.prediction_file)
+    main(args.model, args.template, args.prediction_file)

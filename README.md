@@ -29,22 +29,19 @@ We focus on using **open-source LLMs** that can run on modest hardware, providin
 xcode-select --install
 ```
 
-2. Install miniforge:
+2. Install uv:
 ```bash
-brew install --cask miniforge
-conda init zsh
-source ~/.zshrc
+brew install uv
 ```
 
-3. Create a new conda environment:
-```bash
-conda create -n unrc-cs-thesis python=3.12.9
-conda activate unrc-cs-thesis
-```
-
-4. Clone this repo and navigate to it:
+3. Clone this repo and navigate to it:
 ```bash
 git clone https://github.com/dahue/unrc-cs-thesis.git && cd unrc-cs-thesis
+```
+
+4. Create a virtual environment and install dependencies:
+```bash
+uv sync
 ```
 
 5. Set the project root path in a .env file:
@@ -68,28 +65,26 @@ sh init.sh
 `--test-limit` is optional. It limits the amount of records in test file. It could be useeful for testing over a smaller dataset
 
 ```bash
-python scripts/ML/create_training_set.py --strategy nl2SQL --template template_13 --difficulty easy --test-limit 10
+python scripts/ML/create_training_set.py --template template_13 --difficulty easy --test-limit 10
 ```
 
 ### LLM Fine-tuning
 
 ```bash
-python scripts/ML/finetune.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --strategy nl2SQL --template template_13
+python scripts/ML/finetune.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --template template_13
 ```
 
 ### Prediction
 `--use-adapter` is optional and only required when using the adapter learnt in the finetuning stage.
 `--batch-size` is optional.
 ```bash
-python scripts/ML/predict.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --strategy nl2SQL --template template_13 --input-file test --use-adapter --batch-size 5
+python scripts/ML/predict.py --models mlx-community/Llama-3.2-1B-Instruct-4bit --template template_13 --input-file test --use-adapter --batch-size 5
 ```
-
-
 
 ### Benchmarking
 
 ```bash
-python scripts/ML/benchmark.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --strategy nl2SQL --template template_13 --prediction-file test_predictions_finetuned
+python scripts/ML/benchmark.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --template template_13 --prediction-file test_predictions_finetuned
 ```
 
 ## 📅 Timeline
