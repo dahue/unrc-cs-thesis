@@ -24,11 +24,10 @@ echo ""
 # Download Spider dataset
 SPIDER_DIR="$TMP_DIR/spider_data"
 ZIP_FILE="$TMP_DIR/spider_data.zip"
-NATSQL_DIR="$TMP_DIR/NatSQL"
 
 if [ -f "$ZIP_FILE" ]; then
   echo "📦 Found existing spider_data.zip. Extracting..."
-  unzip "$ZIP_FILE" -d $TMP_DIR/
+  unzip -o "$ZIP_FILE" -d $TMP_DIR/
   rm -rf "$TMP_DIR/__MACOSX"
   echo "✅ spider_data is ready."
 else
@@ -36,7 +35,7 @@ else
   # Use --no-check-certificate when behind corporate/managed SSL (e.g. Kandji) that wget doesn't trust
   wget --no-check-certificate -O "$ZIP_FILE" "https://drive.usercontent.google.com/download?id=1403EGqzIDoHMdQF4c9Bkyl7dZLZ5Wt6J&export=download&authuser=0&confirm=t&uuid=c519429f-e190-4024-9db5-5500dd9f73de&at=ALoNOgmVI-vAWDoXBUn2D2Ezy8Fy:1747082984773"
   echo "📦 Extracting spider_data.zip..."
-  unzip "$ZIP_FILE" -d $TMP_DIR/
+  unzip -o "$ZIP_FILE" -d $TMP_DIR/
   rm -rf "$TMP_DIR/__MACOSX"
   echo "✅ spider_data is ready."
 fi
@@ -85,30 +84,14 @@ fi
 echo "📁 All test databases moved into: $DB_TRAIN"
 echo ""
 
-# Download NatSQL repo
-if [ -d "$NATSQL_DIR" ]; then
-  echo "✅ NatSQL repo already exists at $NATSQL_DIR. Skipping clone."
-else
-  echo "⬇️ Cloning NatSQL repo..."
-  git clone https://github.com/dahue/NatSQL "$NATSQL_DIR"
-  echo "✅ NatSQL repo cloned."
-fi
-echo ""
-
-# Populate Bronze tables
-echo "🐍 Populate Bronze tables..."
-uv run python scripts/pipeline/ingest_bronze.py
+# Build OpenText2SQL.db (bronze + silver + gold tables)
+echo "🐍 Building OpenText2SQL.db..."
+uv run python -m scripts.pipeline.ingest
 echo "✅ Done."
 echo ""
 
-# Transform Bronze to Silver tables
-echo "🐍 Transform Bronze to Silver tables..."
-uv run python scripts/pipeline/bronze_to_silver.py
-echo "✅ Done."
-echo ""
-
-# Transform Silver to Gold tables
-echo "🐍 Transform Silver to Gold tables..."
-uv run python scripts/pipeline/silver_to_gold.py
+# Build embedding index (embedding_dataset in OpenText2SQL.db)
+echo "🐍 Building embedding index..."
+uv run python -m scripts.pipeline.embedding
 echo "✅ Done."
 echo ""

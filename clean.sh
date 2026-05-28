@@ -8,18 +8,24 @@ set +o allexport
 # Exit on any error
 set -e
 
+ALL=false
+for arg in "$@"; do
+    [ "$arg" = "--all" ] && ALL=true
+done
+
 echo "Cleaning project at: $ROOT_PATH"
 echo ""
 
-echo "Removing temporary files..."
-rm -rf "$TMP_DIR/spider_data"
-rm -rf "$TMP_DIR/spider_data.zip"
-rm -rf "$TMP_DIR/NatSQL"
+if [ "$ALL" = true ]; then
+    echo "Removing Spider dataset..."
+    rm -rf "$TMP_DIR/spider_data"
+    rm -rf "$TMP_DIR/spider_data.zip"
+    rm -rf "$TMP_DIR/NatSQL"
+    echo ""
+fi
 
 echo "Removing databases..."
-rm -rf "$ROOT_PATH/database/bronze/bronze.sqlite"
-rm -rf "$ROOT_PATH/database/silver/silver.sqlite"
-rm -rf "$ROOT_PATH/database/gold/gold.sqlite"
+rm -rf "$ROOT_PATH/database/OpenText2SQL.db"
 rm -rf "$ROOT_PATH/database/spider"
 
 echo "Removing data artifacts..."
@@ -29,4 +35,3 @@ rm -rf "$ROOT_PATH/data/benchmark"
 
 echo ""
 echo "Done."
-

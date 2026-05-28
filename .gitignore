@@ -1,9 +1,11 @@
 # Ignore folders
 database/spider/
 data/adapters/
+data/experiment/
 .ipynb_checkpoints/
 __pycache__/
 .venv/
+.claude/
 
 # Ignore files
 CLAUDE.md
@@ -17,8 +19,8 @@ CLAUDE.md
 *.pyc
 *.pkl
 *.sqlite
+*.db
 
 # DON'T ignore:
-!database/bronze/schema.sql
-!database/silver/schema.sql
-!database/gold/schema.sql
+!database/OpenText2SQL.sql
+!database/embedding.sql
