@@ -17,7 +17,13 @@ dependencies = [
     "spacy[apple]==3.8.14",
     "spider",
     "sqlglot==23.11.2",
+    "sqlite-vec==0.1.9",
+    "pytest>=8.0",
+    "python-dotenv>=1.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
 
 [tool.uv.sources]
 spider = { git = "https://github.com/dahue/spider-benchmark.git", rev = "main" }
