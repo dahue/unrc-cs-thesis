@@ -15,7 +15,7 @@ def root_path():
 def db(root_path):
     path = f"{root_path}/database/OpenText2SQL.db"
     if not os.path.exists(path):
-        pytest.skip(f"Database not found at {path}. Run scripts/pipeline/ingest.py first.")
+        pytest.skip(f"Database not found at {path}. Run src/pipeline/ingest.py first.")
     return path
 
 @pytest.fixture(scope="session")

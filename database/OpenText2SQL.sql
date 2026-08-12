@@ -2,6 +2,7 @@ DROP TABLE IF EXISTS bronze_dataset;
 DROP TABLE IF EXISTS spider_tables;
 DROP TABLE IF EXISTS silver_dataset;
 DROP TABLE IF EXISTS gold_dataset;
+DROP TABLE IF EXISTS finetune_dataset;
 
 CREATE TABLE bronze_dataset (
     id INTEGER NOT NULL,
@@ -56,4 +57,17 @@ CREATE TABLE gold_dataset (
     foreign_keys TEXT,
     difficulty TEXT,
     PRIMARY KEY (id, source)
+);
+
+CREATE TABLE finetune_dataset (
+    id INTEGER NOT NULL,
+    db_id TEXT NOT NULL,
+    source TEXT NOT NULL,
+    split TEXT NOT NULL,
+    difficulty TEXT,
+    optimization_rule TEXT NOT NULL,
+    input TEXT NOT NULL,
+    output TEXT NOT NULL,
+    PRIMARY KEY (id, source),
+    FOREIGN KEY (id, source) REFERENCES gold_dataset (id, source)
 );

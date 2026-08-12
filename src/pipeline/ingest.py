@@ -8,7 +8,7 @@ Creates database/OpenText2SQL.db containing:
   - gold_dataset     final curated dataset consumed by the ML pipeline
 
 CLI:
-  uv run python -m scripts.pipeline.ingest
+  uv run python -m src.pipeline.ingest
 """
 
 import os

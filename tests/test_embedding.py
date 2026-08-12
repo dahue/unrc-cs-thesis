@@ -2,7 +2,7 @@ import json
 import sqlite3
 import pytest
 import sqlite_vec
-from scripts.util.nlp import get_question_skeleton, get_few_shot
+from src.util.nlp import get_question_skeleton, get_few_shot
 
 # ---------------------------------------------------------------------------
 # Shared test schema (simplified_ddl JSON format used throughout the pipeline)
