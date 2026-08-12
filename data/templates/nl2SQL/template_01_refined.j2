@@ -1,15 +1,15 @@
 ### Answer the question by SQLite SQL query only and with no explanation. You must minimize SQL execution time while ensuring correctness.
 ### Sqlite SQL tables, with their properties:
 #
-# {{simplified_ddl}}
+# {{refined_simplified_ddl}}
 #
 ### Here is some data information about database references.
 #
-# {{cell_values}}
+{% if refined_cell_values %}# {{refined_cell_values}}{% endif %}
 #
 ### Foreign key information of SQLite tables, used for table joins:
 #
-# {{foreign_keys}}
+{% if refined_foreign_keys %}# {{refined_foreign_keys}}{% endif %}
 #
 ### {{question}}
 ### SQL:

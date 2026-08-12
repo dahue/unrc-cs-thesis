@@ -13,13 +13,13 @@ We focus on using **open-source LLMs** that can run on modest hardware, providin
 - Evaluate and compare open-source LLMs for the Text-to-SQL task
 - Explore effective prompt engineering techniques
 - Address natural language ambiguities and complex database schemas
-- Utilize methods like few-shot learning, self-consistency, and intermediate representations
+- Utilize methods like few-shot learning, schema linking, and self-consistency
 - Benchmark with standard datasets such as [**Spider**](https://yale-lily.github.io/spider)
 
 ## 🔧 Tools & Techniques
 
 - Prompt tuning and context injection
-- Query evaluation based on accuracy and recall
+- Query evaluation based on execution accuracy and exact match
 - Experiments with lightweight, locally deployable models
 
 ## 🛠️ Installation
@@ -29,31 +29,25 @@ We focus on using **open-source LLMs** that can run on modest hardware, providin
 xcode-select --install
 ```
 
-2. Install miniforge:
+2. Install dependencies:
 ```bash
-brew install --cask miniforge
-conda init zsh
-source ~/.zshrc
+brew install uv wget
 ```
 
-3. Create a new conda environment:
-```bash
-conda create -n unrc-cs-thesis python=3.12.9
-conda activate unrc-cs-thesis
-```
-
-4. Clone this repo and navigate to it:
+3. Clone this repo and navigate to it:
 ```bash
 git clone https://github.com/dahue/unrc-cs-thesis.git && cd unrc-cs-thesis
 ```
 
-5. Set the project root path in a .env file:
+4. Create a virtual environment and install dependencies:
 ```bash
-echo "ROOT_PATH=$(pwd)" > .env
+uv sync
 ```
-or manually:
+
+5. Configure environment variables:
 ```bash
-echo "ROOT_PATH=/absolute/path/to/unrc-cs-thesis" > .env
+cp .env.example .env
+# then edit .env and set ROOT_PATH to the absolute path of this repo
 ```
 
 6. Run the initialization script:
@@ -63,33 +57,74 @@ sh init.sh
 
 ## 📚 Usage
 
-### Training set creation
+### OpenText2SQL pipeline
+
+The main entry point is `run.py`, which executes three steps end-to-end:
+
+1. **preSQL** — generates a preliminary SQL query used exclusively for schema linking (identifying relevant tables/columns).
+2. **finSQL** — builds a pruned prompt from the linked schema and runs inference, optionally with cross-consistency across multiple models.
+3. **metrics** — evaluates both preSQL and finSQL against Spider gold SQL and writes `metrics.md` + `raw_metrics.txt`.
+
+All output lands in a timestamped experiment directory: `experiment/<YYYY-MM-DD_HH-MM-SS>/`.
 
 ```bash
-python scripts/ML/create_training_set.py --strategy nl2SQL --template template_13
+# Single model (no cross-consistency): first model used for preSQL, same model for finSQL
+uv run python -m src.ml.run \
+    --config OpenText2SQL.json \
+    --models Qwen3-14B-4bit \
+    --source test --difficulty hard --limit 100
+
+# Multiple models: first model for preSQL, all models for finSQL cross-consistency
+uv run python -m src.ml.run \
+    --config OpenText2SQL.json \
+    --models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit gemma-3-12b-it-4bit-DWQ \
+    --source test --difficulty hard --limit 100 \
+    --batch-size 2
+
+# Separate control over preSQL and finSQL models
+uv run python -m src.ml.run \
+    --config OpenText2SQL.json \
+    --presql-model Qwen3.5-9B-MLX-4bit \
+    --finsql-models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit \
+    --source test --difficulty hard --limit 100
+
+# Baseline: skip preSQL and feed the full-schema prompt directly into finSQL
+uv run python -m src.ml.run \
+    --config OpenText2SQL.json \
+    --skip-presql \
+    --finsql-models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit \
+    --source test --difficulty hard --limit 100
 ```
 
-### LLM Fine-tuning
+Model short keys (defined in `src/ml/models.json`) map to their full HuggingFace paths and are downloaded automatically on first use.
+
+### Standalone scripts
+
+The three pipeline steps can also be run independently:
 
 ```bash
-python scripts/ML/finetune.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --strategy nl2SQL --template template_13
-```
+# Step 1: generate preSQL predictions
+uv run python -m src.ml.gen_presql \
+    --config OpenText2SQL.json \
+    --model Qwen3-14B-4bit \
+    --source test --difficulty hard --limit 100
 
-### Prediction
-The flag `--use-adapter` is optional and only required when using the adapter learnt in the finetuning stage.
-```bash
-python scripts/ML/predict.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --strategy nl2SQL --template template_13 --input-file t_test --use-adapter
-```
+# Step 2: generate finSQL from an existing presql.jsonl
+uv run python -m src.ml.gen_finsql \
+    --presql experiment/2026-05-26_02-15-18/presql.jsonl \
+    --config OpenText2SQL.json \
+    --models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit
 
-### Benchmarking
-
-```bash
-python scripts/ML/benchmark.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --strategy nl2SQL --template template_13 --prediction-file test_predictions_finetuned
+# Step 3: evaluate and export metrics
+uv run python -m src.ml.gen_metrics \
+    experiment/2026-05-26_02-15-18/presql.jsonl \
+    experiment/2026-05-26_02-15-18/finsql.jsonl \
+    --raw-metrics
 ```
 
 ## 📅 Timeline
 
-Development started in **November 2024** and is expected to conclude by **June 2025**.
+Development started in **November 2024**.
 
 ## 👨‍💻 Author
 
@@ -109,3 +144,4 @@ Thesis Director: **Dr. Pablo Ponzio**
 - [**High Precision Natural Language Interfaces to Databases: a Graph Theoretic Approach**](https://aiweb.cs.washington.edu/research/projects/ai2/nli/aaai_submission.pdf)
 - [**Towards a Theory of Natural Language Interfaces to Databases**](https://turing.cs.washington.edu/papers/nli-iui03.pdf)
 - [**RESDSQL: Decoupling Schema Linking and Skeleton Parsing for Text-to-SQL**](https://arxiv.org/pdf/2302.05965v3)
+- [**The Illusion of Thinking**](https://ml-site.cdn-apple.com/papers/the-illusion-of-thinking.pdf)

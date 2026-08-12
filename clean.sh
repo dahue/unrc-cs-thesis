@@ -5,22 +5,33 @@ set -o allexport
 source .env
 set +o allexport
 
-# Now use the variables
-echo "Project root is: $ROOT_PATH"
-
 # Exit on any error
 set -e
 
-rm -rf "$TMP_DIR/spider_data"
-rm -rf "$TMP_DIR/spider_data.zip"
-rm -rf "$TMP_DIR/NatSQL"
+ALL=false
+for arg in "$@"; do
+    [ "$arg" = "--all" ] && ALL=true
+done
 
-rm -rf "$ROOT_PATH/database/bronze/bronze.sqlite"
-rm -rf "$ROOT_PATH/database/silver/silver.sqlite"
-rm -rf "$ROOT_PATH/database/gold/gold.sqlite"
+echo "Cleaning project at: $ROOT_PATH"
+echo ""
+
+if [ "$ALL" = true ]; then
+    echo "Removing Spider dataset..."
+    rm -rf "$TMP_DIR/spider_data"
+    rm -rf "$TMP_DIR/spider_data.zip"
+    rm -rf "$TMP_DIR/NatSQL"
+    echo ""
+fi
+
+echo "Removing databases..."
+rm -rf "$ROOT_PATH/database/OpenText2SQL.db"
 rm -rf "$ROOT_PATH/database/spider"
 
+echo "Removing data artifacts..."
 rm -rf "$ROOT_PATH/data/training"
 rm -rf "$ROOT_PATH/data/predictions"
 rm -rf "$ROOT_PATH/data/benchmark"
 
+echo ""
+echo "Done."
