@@ -1,7 +1,8 @@
 # Ignore folders
 database/spider/
 data/adapters/
-data/experiment/
+experiment/
+src/ml/legacy/
 .ipynb_checkpoints/
 __pycache__/
 .venv/
@@ -20,7 +21,10 @@ CLAUDE.md
 *.pkl
 *.sqlite
 *.db
+*.safetensors
 
 # DON'T ignore:
+!config/prompt/
 !database/OpenText2SQL.sql
 !database/embedding.sql
+!src/ml/models.json

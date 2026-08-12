@@ -12,24 +12,24 @@ Pipeline:
   5. Write finsql.jsonl next to the input presql.jsonl.
 
 Usage:
-    uv run python -m scripts.ML.gen_finsql \
-        --presql data/experiment/2026-05-26_02-15-18/presql.jsonl \
+    uv run python -m src.ml.gen_finsql \
+        --presql experiment/2026-05-26_02-15-18/presql.jsonl \
         --config OpenText2SQL.json \
         --models Llama-3.2-3B-Instruct-4bit Qwen3-14B-4bit
 
-    uv run python -m scripts.ML.gen_finsql \
-        --presql data/experiment/2026-05-26_02-15-18/presql.jsonl \
+    uv run python -m src.ml.gen_finsql \
+        --presql experiment/2026-05-26_02-15-18/presql.jsonl \
         --config OpenText2SQL.json \
         --models Llama-3.2-3B-Instruct-4bit Qwen3-14B-4bit \
         --limit 50 --batch-size 4
 
-    uv run python -m scripts.ML.gen_finsql \
-        --presql data/experiment/2026-05-26_02-15-18/presql.jsonl \
+    uv run python -m src.ml.gen_finsql \
+        --presql experiment/2026-05-26_02-15-18/presql.jsonl \
         --config OpenText2SQL.json \
         --models Qwen3-14B-4bit
 
 Output:
-  data/experiment/2026-05-26_02-15-18/finsql.jsonl
+  experiment/2026-05-26_02-15-18/finsql.jsonl
   Each line: {question, db_id, source, difficulty, gold_sql,
               presql, presql_model, presql_config, presql_prompt,
               simplified_ddl, foreign_keys, cell_values, few_shot, section_visibility,
@@ -48,7 +48,7 @@ ROOT_PATH = os.environ.get("ROOT_PATH")
 if not ROOT_PATH:
     raise ValueError("ROOT_PATH not set. Add it to your .env file.")
 
-PROMPTS_DIR = f"{ROOT_PATH}/data/prompt"
+PROMPTS_DIR = f"{ROOT_PATH}/config/prompt"
 
 
 def main():
@@ -56,7 +56,7 @@ def main():
         description="Generate finSQL via cross-consistency from a presql.jsonl file."
     )
     parser.add_argument("--presql", required=True,
-                        help="Path to presql.jsonl (e.g. data/experiment/2026-05-26.../presql.jsonl).")
+                        help="Path to presql.jsonl (e.g. experiment/2026-05-26.../presql.jsonl).")
     parser.add_argument("--config", required=True,
                         help="Prompt config filename, e.g. OpenText2SQL.json")
     parser.add_argument("--models", nargs="+", required=True,
@@ -91,7 +91,7 @@ def main():
         config = json.load(f)
 
     # ── Step 3: schema linking ────────────────────────────────────────────────
-    from scripts.util.llm import schema_linking, render_prompt, cross_consistency, resolve_model
+    from src.util.llm import schema_linking, render_prompt, cross_consistency, resolve_model
 
     print("Applying schema linking...")
     linked = schema_linking(records)

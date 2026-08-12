@@ -2,8 +2,8 @@
 gen_presql.py — Generate preSQL predictions for a dataset split and write results to JSONL.
 
 Usage:
-  uv run python -m scripts.ML.gen_presql --config OpenText2SQL.json --model Llama-3.2-3B-Instruct-4bit
-  uv run python -m scripts.ML.gen_presql \
+  uv run python -m src.ml.gen_presql --config OpenText2SQL.json --model Llama-3.2-3B-Instruct-4bit
+  uv run python -m src.ml.gen_presql \
       --config OpenText2SQL.json \
       --model Llama-3.2-3B-Instruct-4bit \
       --source test \
@@ -12,7 +12,7 @@ Usage:
       --batch-size 2
 
 Output:
-  data/experiment/<YYYY-MM-DD_HH-MM-SS>/presql.jsonl
+  experiment/<YYYY-MM-DD_HH-MM-SS>/presql.jsonl
   Each line: {"prompt": "...", "presql": "...", "question": "...", "db_id": "...",
               "source": "...", "difficulty": "...", "gold_sql": "...",
               "simplified_ddl": "...", "foreign_keys": "...", "cell_values": "...", "few_shot": [...],
@@ -32,8 +32,8 @@ if not ROOT_PATH:
     raise ValueError("ROOT_PATH not set. Add it to your .env file.")
 
 DB = f"{ROOT_PATH}/database/OpenText2SQL.db"
-PROMPTS_DIR = f"{ROOT_PATH}/data/prompt"
-EXPERIMENTS_DIR = f"{ROOT_PATH}/data/experiment"
+PROMPTS_DIR = f"{ROOT_PATH}/config/prompt"
+EXPERIMENTS_DIR = f"{ROOT_PATH}/experiment"
 
 
 def main():
@@ -62,7 +62,7 @@ def main():
                         help="Max tokens to generate per prompt (default: 512).")
     parser.add_argument("--out-dir", default=None,
                         help="Directory to write presql.jsonl into. "
-                             "Defaults to data/experiment/<YYYY-MM-DD_HH-MM-SS>/.")
+                             "Defaults to experiment/<YYYY-MM-DD_HH-MM-SS>/.")
 
     args = parser.parse_args()
 
@@ -76,7 +76,7 @@ def main():
     difficulty = args.difficulty[0] if args.difficulty and len(args.difficulty) == 1 else args.difficulty
 
     # ── Step 1: generate prompts ──────────────────────────────────────────────
-    from scripts.util.llm import prompt_generation, infer
+    from src.util.llm import prompt_generation, infer
 
     print(f"Generating prompts from {args.config} ({args.source}, difficulty={difficulty or 'all'}, limit={args.limit})...")
     records = prompt_generation(
@@ -115,7 +115,7 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     out_path = os.path.join(out_dir, "presql.jsonl")
 
-    from scripts.util.llm import resolve_model
+    from src.util.llm import resolve_model
     resolved_model = resolve_model(args.model.partition(":")[0])
 
     with open(out_path, "w", encoding="utf-8") as f:

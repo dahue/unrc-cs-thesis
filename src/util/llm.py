@@ -8,7 +8,7 @@ Public API:
   render_prompt(config, rec, section_visibility=None)                     -> str
   cross_consistency(models, records, batch_size=1, max_tokens=512)       -> List[Dict]
 
-Model keys are short names defined in scripts/ML/models.json (e.g. "Qwen3-14B-4bit").
+Model keys are short names defined in src/ml/models.json (e.g. "Qwen3-14B-4bit").
 Prompt configs are JSON dicts with sections keyed by name, each having "text" and "visible" fields.
 """
 
@@ -24,7 +24,7 @@ from mlx_lm import load, batch_generate
 from mlx_lm.sample_utils import make_sampler
 
 _MODELS_FILE = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "ML", "models.json")
+    os.path.join(os.path.dirname(__file__), "..", "ml", "models.json")
 )
 
 
@@ -311,7 +311,7 @@ def prompt_generation(
       - few_shot     — retrieved via vector similarity from embedding_dataset
 
     Args:
-        config:          Parsed prompt config dict (from a data/prompt/*.json file).
+        config:          Parsed prompt config dict (from a config/prompt/*.json file).
         db_path:         Path to OpenText2SQL.db.
         source:          Filter by 'train', 'dev', or 'test'. None = all.
         difficulty:      Filter by one or more of 'easy', 'medium', 'hard', 'extra'. None = all.
@@ -379,7 +379,7 @@ def prompt_generation(
             render_params["cell_values"] = _apply_prefix(cell_values_raw, prefixes["cell_values"])
         few_shot_examples: List[Dict] = []
         if "few_shot" in needs:
-            from scripts.util.nlp import get_few_shot
+            from src.util.nlp import get_few_shot
             few_shot_examples = get_few_shot(question, simplified_ddl_raw, db_path, db_path, top_k=top_k_few_shot)
             render_params["few_shot"] = _apply_prefix(
                 _format_few_shot(few_shot_examples), prefixes["few_shot"]
@@ -538,7 +538,7 @@ def schema_linking(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "reference_values":  bool,   # True unless cell_values pruned to empty
           }
     """
-    from scripts.util.nlp import extract_referenced_tables_from_sql
+    from src.util.nlp import extract_referenced_tables_from_sql
 
     results = []
     for rec in records:

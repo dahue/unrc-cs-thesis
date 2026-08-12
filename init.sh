@@ -86,12 +86,12 @@ echo ""
 
 # Build OpenText2SQL.db (bronze + silver + gold tables)
 echo "🐍 Building OpenText2SQL.db..."
-uv run python -m scripts.pipeline.ingest
+uv run python -m src.pipeline.ingest
 echo "✅ Done."
 echo ""
 
 # Build embedding index (embedding_dataset in OpenText2SQL.db)
 echo "🐍 Building embedding index..."
-uv run python -m scripts.pipeline.embedding
+uv run python -m src.pipeline.embedding
 echo "✅ Done."
 echo ""

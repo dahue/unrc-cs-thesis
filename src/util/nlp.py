@@ -20,7 +20,7 @@ import sqlite_vec
 from nltk.stem import WordNetLemmatizer
 from nltk.tokenize import word_tokenize
 
-# NLTK data is expected to already be present (downloaded by scripts/pipeline/embedding.py).
+# NLTK data is expected to already be present (downloaded by src/pipeline/embedding.py).
 
 _nlp = None
 _TABLE = "embedding_dataset"

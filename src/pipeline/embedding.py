@@ -4,10 +4,10 @@ embedding.py — Builds the few-shot vector index using sqlite-vec.
 Public API:
   build_index(gold_db_path, index_db_path)
 
-Retrieval utilities (get_question_skeleton, get_few_shot) live in scripts.util.nlp.
+Retrieval utilities (get_question_skeleton, get_few_shot) live in src.util.nlp.
 
 CLI:
-  uv run python -m scripts.pipeline.embedding
+  uv run python -m src.pipeline.embedding
 """
 
 import os
@@ -27,7 +27,7 @@ try:
 except LookupError:
     nltk.download('wordnet')
 
-from scripts.util.nlp import _get_nlp, _open_vec_conn, get_question_skeleton
+from src.util.nlp import _get_nlp, _open_vec_conn, get_question_skeleton
 
 _TABLE = "embedding_dataset"
 _SCHEMA_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "database", "embedding.sql")
@@ -127,6 +127,6 @@ if __name__ == "__main__":
     db = f"{ROOT_PATH}/database/OpenText2SQL.db"
 
     if not os.path.exists(db):
-        raise FileNotFoundError(f"Database not found at {db}. Run scripts/pipeline/ingest.py first.")
+        raise FileNotFoundError(f"Database not found at {db}. Run src/pipeline/ingest.py first.")
 
     build_index(db, db)

@@ -13,13 +13,13 @@ We focus on using **open-source LLMs** that can run on modest hardware, providin
 - Evaluate and compare open-source LLMs for the Text-to-SQL task
 - Explore effective prompt engineering techniques
 - Address natural language ambiguities and complex database schemas
-- Utilize methods like few-shot learning, self-consistency, and intermediate representations
+- Utilize methods like few-shot learning, schema linking, and self-consistency
 - Benchmark with standard datasets such as [**Spider**](https://yale-lily.github.io/spider)
 
 ## 🔧 Tools & Techniques
 
 - Prompt tuning and context injection
-- Query evaluation based on accuracy and recall
+- Query evaluation based on execution accuracy and exact match
 - Experiments with lightweight, locally deployable models
 
 ## 🛠️ Installation
@@ -29,9 +29,9 @@ We focus on using **open-source LLMs** that can run on modest hardware, providin
 xcode-select --install
 ```
 
-2. Install uv:
+2. Install dependencies:
 ```bash
-brew install uv
+brew install uv wget
 ```
 
 3. Clone this repo and navigate to it:
@@ -44,13 +44,10 @@ git clone https://github.com/dahue/unrc-cs-thesis.git && cd unrc-cs-thesis
 uv sync
 ```
 
-5. Set the project root path in a .env file:
+5. Configure environment variables:
 ```bash
-echo "ROOT_PATH=$(pwd)" > .env
-```
-or manually:
-```bash
-echo "ROOT_PATH=/absolute/path/to/unrc-cs-thesis" > .env
+cp .env.example .env
+# then edit .env and set ROOT_PATH to the absolute path of this repo
 ```
 
 6. Run the initialization script:
@@ -60,36 +57,74 @@ sh init.sh
 
 ## 📚 Usage
 
-### Training set creation
-`--difficulty` is optional. It creates a dataset with a specific dificulty (easy, medium, hard, extra)
-`--test-limit` is optional. It limits the amount of records in test file. It could be useeful for testing over a smaller dataset
+### OpenText2SQL pipeline
+
+The main entry point is `run.py`, which executes three steps end-to-end:
+
+1. **preSQL** — generates a preliminary SQL query used exclusively for schema linking (identifying relevant tables/columns).
+2. **finSQL** — builds a pruned prompt from the linked schema and runs inference, optionally with cross-consistency across multiple models.
+3. **metrics** — evaluates both preSQL and finSQL against Spider gold SQL and writes `metrics.md` + `raw_metrics.txt`.
+
+All output lands in a timestamped experiment directory: `experiment/<YYYY-MM-DD_HH-MM-SS>/`.
 
 ```bash
-python scripts/ML/create_training_set.py --template template_13 --difficulty easy --test-limit 10
+# Single model (no cross-consistency): first model used for preSQL, same model for finSQL
+uv run python -m src.ml.run \
+    --config OpenText2SQL.json \
+    --models Qwen3-14B-4bit \
+    --source test --difficulty hard --limit 100
+
+# Multiple models: first model for preSQL, all models for finSQL cross-consistency
+uv run python -m src.ml.run \
+    --config OpenText2SQL.json \
+    --models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit gemma-3-12b-it-4bit-DWQ \
+    --source test --difficulty hard --limit 100 \
+    --batch-size 2
+
+# Separate control over preSQL and finSQL models
+uv run python -m src.ml.run \
+    --config OpenText2SQL.json \
+    --presql-model Qwen3.5-9B-MLX-4bit \
+    --finsql-models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit \
+    --source test --difficulty hard --limit 100
+
+# Baseline: skip preSQL and feed the full-schema prompt directly into finSQL
+uv run python -m src.ml.run \
+    --config OpenText2SQL.json \
+    --skip-presql \
+    --finsql-models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit \
+    --source test --difficulty hard --limit 100
 ```
 
-### LLM Fine-tuning
+Model short keys (defined in `src/ml/models.json`) map to their full HuggingFace paths and are downloaded automatically on first use.
+
+### Standalone scripts
+
+The three pipeline steps can also be run independently:
 
 ```bash
-python scripts/ML/finetune.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --template template_13
-```
+# Step 1: generate preSQL predictions
+uv run python -m src.ml.gen_presql \
+    --config OpenText2SQL.json \
+    --model Qwen3-14B-4bit \
+    --source test --difficulty hard --limit 100
 
-### Prediction
-`--use-adapter` is optional and only required when using the adapter learnt in the finetuning stage.
-`--batch-size` is optional.
-```bash
-python scripts/ML/predict.py --models mlx-community/Llama-3.2-1B-Instruct-4bit --template template_13 --input-file test --use-adapter --batch-size 5
-```
+# Step 2: generate finSQL from an existing presql.jsonl
+uv run python -m src.ml.gen_finsql \
+    --presql experiment/2026-05-26_02-15-18/presql.jsonl \
+    --config OpenText2SQL.json \
+    --models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit
 
-### Benchmarking
-
-```bash
-python scripts/ML/benchmark.py --model mlx-community/Llama-3.2-1B-Instruct-4bit --template template_13 --prediction-file test_predictions_finetuned
+# Step 3: evaluate and export metrics
+uv run python -m src.ml.gen_metrics \
+    experiment/2026-05-26_02-15-18/presql.jsonl \
+    experiment/2026-05-26_02-15-18/finsql.jsonl \
+    --raw-metrics
 ```
 
 ## 📅 Timeline
 
-Development started in **November 2024** and is expected to conclude by **June 2025**.
+Development started in **November 2024**.
 
 ## 👨‍💻 Author
 

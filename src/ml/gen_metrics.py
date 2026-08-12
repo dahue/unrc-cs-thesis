@@ -6,10 +6,10 @@ then writes a clean markdown table to metrics.md next to the input file(s).
 Use --raw-metrics to also export Spider's full evaluation output as raw_metrics.txt.
 
 Usage:
-  uv run python -m scripts.ML.gen_metrics data/experiment/.../finsql.jsonl
-  uv run python -m scripts.ML.gen_metrics data/experiment/.../finsql.jsonl --sql presql
-  uv run python -m scripts.ML.gen_metrics data/experiment/.../presql.jsonl data/experiment/.../finsql.jsonl
-  uv run python -m scripts.ML.gen_metrics data/experiment/.../presql.jsonl data/experiment/.../finsql.jsonl --raw-metrics
+  uv run python -m src.ml.gen_metrics experiment/.../finsql.jsonl
+  uv run python -m src.ml.gen_metrics experiment/.../finsql.jsonl --sql presql
+  uv run python -m src.ml.gen_metrics experiment/.../presql.jsonl experiment/.../finsql.jsonl
+  uv run python -m src.ml.gen_metrics experiment/.../presql.jsonl experiment/.../finsql.jsonl --raw-metrics
 """
 
 import io
