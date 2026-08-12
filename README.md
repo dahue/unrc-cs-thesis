@@ -65,7 +65,7 @@ The main entry point is `run.py`, which executes three steps end-to-end:
 2. **finSQL** — builds a pruned prompt from the linked schema and runs inference, optionally with cross-consistency across multiple models.
 3. **metrics** — evaluates both preSQL and finSQL against Spider gold SQL and writes `metrics.md` + `raw_metrics.txt`.
 
-All output lands in a timestamped experiment directory: `experiment/<YYYY-MM-DD_HH-MM-SS>/`.
+All output lands in a timestamped experiment directory: `experiments/<YYYY-MM-DD_HH-MM-SS>/`.
 
 ```bash
 # Single model (no cross-consistency): first model used for preSQL, same model for finSQL
@@ -111,14 +111,14 @@ uv run python -m src.ml.gen_presql \
 
 # Step 2: generate finSQL from an existing presql.jsonl
 uv run python -m src.ml.gen_finsql \
-    --presql experiment/2026-05-26_02-15-18/presql.jsonl \
+    --presql experiments/2026-05-26_02-15-18/presql.jsonl \
     --config OpenText2SQL.json \
     --models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit
 
 # Step 3: evaluate and export metrics
 uv run python -m src.ml.gen_metrics \
-    experiment/2026-05-26_02-15-18/presql.jsonl \
-    experiment/2026-05-26_02-15-18/finsql.jsonl \
+    experiments/2026-05-26_02-15-18/presql.jsonl \
+    experiments/2026-05-26_02-15-18/finsql.jsonl \
     --raw-metrics
 ```
 

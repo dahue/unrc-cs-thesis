@@ -14,7 +14,6 @@ import sqlite3
 import subprocess
 from typing import Optional, Set, Tuple
 
-import nltk
 import spacy
 import sqlite_vec
 from nltk.stem import WordNetLemmatizer

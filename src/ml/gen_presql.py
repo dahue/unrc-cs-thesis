@@ -12,7 +12,7 @@ Usage:
       --batch-size 2
 
 Output:
-  experiment/<YYYY-MM-DD_HH-MM-SS>/presql.jsonl
+  experiments/<YYYY-MM-DD_HH-MM-SS>/presql.jsonl
   Each line: {"prompt": "...", "presql": "...", "question": "...", "db_id": "...",
               "source": "...", "difficulty": "...", "gold_sql": "...",
               "simplified_ddl": "...", "foreign_keys": "...", "cell_values": "...", "few_shot": [...],
@@ -33,7 +33,30 @@ if not ROOT_PATH:
 
 DB = f"{ROOT_PATH}/database/OpenText2SQL.db"
 PROMPTS_DIR = f"{ROOT_PATH}/config/prompt"
-EXPERIMENTS_DIR = f"{ROOT_PATH}/experiment"
+EXPERIMENTS_DIR = f"{ROOT_PATH}/experiments"
+
+
+def write_presql_jsonl(out_dir: str, records: list, sql_results: list, resolved_model: str, config_name: str) -> str:
+    out_path = os.path.join(out_dir, "presql.jsonl")
+    with open(out_path, "w", encoding="utf-8") as f:
+        for rec, presql in zip(records, sql_results):
+            line = {
+                "prompt":         " ".join(rec["prompt"].split()),  # collapse to one line
+                "presql":         presql,
+                "question":       rec["question"],
+                "db_id":          rec["db_id"],
+                "source":         rec["source"],
+                "difficulty":     rec["difficulty"],
+                "gold_sql":       rec["query"],
+                "simplified_ddl": rec["simplified_ddl"],
+                "foreign_keys":   rec["foreign_keys"],
+                "cell_values":    rec["cell_values"],
+                "few_shot":       rec["few_shot"],
+                "model":          resolved_model,
+                "config":         config_name,
+            }
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    return out_path
 
 
 def main():
@@ -62,7 +85,7 @@ def main():
                         help="Max tokens to generate per prompt (default: 512).")
     parser.add_argument("--out-dir", default=None,
                         help="Directory to write presql.jsonl into. "
-                             "Defaults to experiment/<YYYY-MM-DD_HH-MM-SS>/.")
+                             "Defaults to experiments/<YYYY-MM-DD_HH-MM-SS>/.")
 
     args = parser.parse_args()
 
@@ -113,29 +136,11 @@ def main():
         experiment_id = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         out_dir = os.path.join(EXPERIMENTS_DIR, experiment_id)
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, "presql.jsonl")
 
     from src.util.llm import resolve_model
     resolved_model = resolve_model(args.model.partition(":")[0])
 
-    with open(out_path, "w", encoding="utf-8") as f:
-        for rec, presql in zip(records, sql_results):
-            line = {
-                "prompt":         " ".join(rec["prompt"].split()),  # collapse to one line
-                "presql":         presql,
-                "question":       rec["question"],
-                "db_id":          rec["db_id"],
-                "source":         rec["source"],
-                "difficulty":     rec["difficulty"],
-                "gold_sql":       rec["query"],
-                "simplified_ddl": rec["simplified_ddl"],
-                "foreign_keys":   rec["foreign_keys"],
-                "cell_values":    rec["cell_values"],
-                "few_shot":       rec["few_shot"],
-                "model":          resolved_model,
-                "config":         args.config,
-            }
-            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    out_path = write_presql_jsonl(out_dir, records, sql_results, resolved_model, args.config)
 
     print(f"✓ {len(records)} records written to {out_path}")
 

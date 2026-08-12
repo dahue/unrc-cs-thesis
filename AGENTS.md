@@ -29,8 +29,8 @@ uv run python -m src.ml.run \
 
 # Standalone steps
 uv run python -m src.ml.gen_presql --config OpenText2SQL.json --model Qwen3-14B-4bit --source dev
-uv run python -m src.ml.gen_finsql --presql experiment/.../presql.jsonl --config OpenText2SQL.json --models Qwen3-14B-4bit
-uv run python -m src.ml.gen_metrics experiment/.../presql.jsonl experiment/.../finsql.jsonl
+uv run python -m src.ml.gen_finsql --presql experiments/.../presql.jsonl --config OpenText2SQL.json --models Qwen3-14B-4bit
+uv run python -m src.ml.gen_metrics experiments/.../presql.jsonl experiments/.../finsql.jsonl
 
 # Tests
 uv run pytest tests/
@@ -57,7 +57,7 @@ Runs once via `init.sh`; produces a single SQLite database at `database/OpenText
 
 #### `run.py` — end-to-end entry point
 
-Executes all three steps and writes output to `experiment/<YYYY-MM-DD_HH-MM-SS>/`.
+Executes all three steps and writes output to `experiments/<YYYY-MM-DD_HH-MM-SS>/`.
 
 ```
 preSQL → finSQL → metrics
@@ -93,7 +93,7 @@ JSON files (e.g. `OpenText2SQL.json`, `Baseline.json`) that define named section
 
 All experiment output lands under:
 ```
-experiment/<YYYY-MM-DD_HH-MM-SS>/
+experiments/<YYYY-MM-DD_HH-MM-SS>/
   presql.jsonl
   finsql.jsonl
   metrics.md

@@ -1,7 +1,7 @@
 # Ignore folders
 database/spider/
 data/adapters/
-experiment/
+experiments/
 src/ml/legacy/
 .ipynb_checkpoints/
 __pycache__/

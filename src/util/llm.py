@@ -63,15 +63,6 @@ def parse_model_spec(model_spec: str) -> tuple[str, bool]:
     raise ValueError(f"Invalid model spec: {model_spec}. Use 'model_name' or 'model_name:fine-tuned'")
 
 
-def get_model_dir_name(name: str) -> str:
-    """Strip common HuggingFace org prefix to get the local directory name."""
-    if name.startswith("mlx-community/"):
-        return name.removeprefix("mlx-community/")
-    if "/" in name:
-        return name.split("/")[-1]
-    return name
-
-
 def normalize_response(text: str) -> str:
     return " ".join(text.split())
 
@@ -217,11 +208,7 @@ def _parse_json_list(value: str) -> List[str]:
         return []
 
 
-def _render_simplified_ddl(raw: str) -> str:
-    return "\n".join(_parse_json_list(raw))
-
-
-def _render_foreign_keys(raw: str) -> str:
+def _render_json_lines(raw: str) -> str:
     return "\n".join(_parse_json_list(raw))
 
 
@@ -368,11 +355,11 @@ def prompt_generation(
             render_params["question"] = question
         if "simplified_ddl" in needs:
             render_params["simplified_ddl"] = _apply_prefix(
-                _render_simplified_ddl(simplified_ddl_raw), prefixes["simplified_ddl"]
+                _render_json_lines(simplified_ddl_raw), prefixes["simplified_ddl"]
             )
         if "foreign_keys" in needs:
             render_params["foreign_keys"] = _apply_prefix(
-                _render_foreign_keys(foreign_keys_raw), prefixes["foreign_keys"]
+                _render_json_lines(foreign_keys_raw), prefixes["foreign_keys"]
             )
         cell_values_raw = _render_cell_values(db_id, spider_db_dir)
         if "cell_values" in needs:
@@ -455,7 +442,7 @@ def render_prompt(
             render_params["simplified_ddl"] = "None."
         else:
             render_params["simplified_ddl"] = _apply_prefix(
-                _render_simplified_ddl(rec.get("simplified_ddl") or "[]"),
+                _render_json_lines(rec.get("simplified_ddl") or "[]"),
                 prefixes.get("simplified_ddl", ""),
             )
     if "foreign_keys" in needs:
@@ -463,7 +450,7 @@ def render_prompt(
             render_params["foreign_keys"] = "None."
         else:
             render_params["foreign_keys"] = _apply_prefix(
-                _render_foreign_keys(rec.get("foreign_keys") or "[]"),
+                _render_json_lines(rec.get("foreign_keys") or "[]"),
                 prefixes.get("foreign_keys", ""),
             )
     if "cell_values" in needs:

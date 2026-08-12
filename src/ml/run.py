@@ -8,7 +8,7 @@ Pipeline:
   3. metrics     — evaluate both against gold SQL; write metrics.md + raw_metrics.txt.
 
 All three steps write their output under the same experiment directory:
-  experiment/<YYYY-MM-DD_HH-MM-SS>/
+  experiments/<YYYY-MM-DD_HH-MM-SS>/
     presql.jsonl
     finsql.jsonl
     metrics.md
@@ -61,60 +61,7 @@ if not ROOT_PATH:
 
 DB          = f"{ROOT_PATH}/database/OpenText2SQL.db"
 PROMPTS_DIR = f"{ROOT_PATH}/config/prompt"
-EXP_DIR     = f"{ROOT_PATH}/experiment"
-
-
-def _write_presql_jsonl(out_dir: str, records: list, sql_results: list, resolved_model: str, config_name: str):
-    out_path = os.path.join(out_dir, "presql.jsonl")
-    with open(out_path, "w", encoding="utf-8") as f:
-        for rec, presql in zip(records, sql_results):
-            line = {
-                "prompt":         " ".join(rec["prompt"].split()),
-                "presql":         presql,
-                "question":       rec["question"],
-                "db_id":          rec["db_id"],
-                "source":         rec["source"],
-                "difficulty":     rec["difficulty"],
-                "gold_sql":       rec["query"],
-                "simplified_ddl": rec["simplified_ddl"],
-                "foreign_keys":   rec["foreign_keys"],
-                "cell_values":    rec["cell_values"],
-                "few_shot":       rec["few_shot"],
-                "model":          resolved_model,
-                "config":         config_name,
-            }
-            f.write(json.dumps(line, ensure_ascii=False) + "\n")
-    return out_path
-
-
-def _write_finsql_jsonl(out_dir: str, records: list, linked: list, results: list, resolved_models: list, config_name: str):
-    out_path = os.path.join(out_dir, "finsql.jsonl")
-    with open(out_path, "w", encoding="utf-8") as f:
-        for orig, rec_linked, result in zip(records, linked, results):
-            line = {
-                "question":           orig.get("question"),
-                "db_id":              orig.get("db_id"),
-                "source":             orig.get("source"),
-                "difficulty":         orig.get("difficulty"),
-                "gold_sql":           orig.get("gold_sql"),
-                "presql":             orig.get("presql"),
-                "presql_model":       orig.get("model"),
-                "presql_config":      orig.get("config"),
-                "presql_prompt":      orig.get("prompt"),
-                "simplified_ddl":     rec_linked.get("simplified_ddl"),
-                "foreign_keys":       rec_linked.get("foreign_keys"),
-                "cell_values":        rec_linked.get("cell_values"),
-                "few_shot":           orig.get("few_shot"),
-                "section_visibility": rec_linked.get("section_visibility"),
-                "finsql_prompt":      rec_linked.get("prompt"),
-                "finsql":             result.get("sql"),
-                "all_sql":            result.get("all_sql"),
-                "consistency_score":  result.get("consistency_score"),
-                "models":             resolved_models,
-                "config":             config_name,
-            }
-            f.write(json.dumps(line, ensure_ascii=False) + "\n")
-    return out_path
+EXP_DIR     = f"{ROOT_PATH}/experiments"
 
 
 def main():
@@ -204,6 +151,8 @@ def main():
         prompt_generation, infer, resolve_model,
         schema_linking, render_prompt, cross_consistency,
     )
+    from src.ml.gen_presql import write_presql_jsonl
+    from src.ml.gen_finsql import write_finsql_jsonl
 
     # ══ Step 1: preSQL ═══════════════════════════════════════════════════════
     print(f"{sep}")
@@ -255,7 +204,7 @@ def main():
         )
 
         resolved_presql_model = resolve_model(presql_model.partition(":")[0])
-        presql_path = _write_presql_jsonl(out_dir, records, presql_results, resolved_presql_model, args.config)
+        presql_path = write_presql_jsonl(out_dir, records, presql_results, resolved_presql_model, args.config)
         print(f"✓ presql.jsonl → {presql_path}")
     print()
 
@@ -291,7 +240,7 @@ def main():
     )
 
     resolved_finsql_models = [resolve_model(m.partition(":")[0]) for m in finsql_models]
-    finsql_path = _write_finsql_jsonl(out_dir, presql_records, linked, finsql_results, resolved_finsql_models, args.config)
+    finsql_path = write_finsql_jsonl(out_dir, presql_records, linked, finsql_results, resolved_finsql_models, args.config)
     print(f"✓ finsql.jsonl → {finsql_path}")
     print()
 

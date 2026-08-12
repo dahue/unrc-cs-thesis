@@ -32,7 +32,7 @@ ROOT_PATH   = os.environ.get("ROOT_PATH", ".")
 DB_PATH     = os.path.join(ROOT_PATH, "database", "OpenText2SQL.db")
 ADAPTER_DIR = os.path.join(ROOT_PATH, "config", "adapter")
 CONFIG_DIR  = os.path.join(ROOT_PATH, "config", "prompt")
-EXP_DIR     = os.path.join(ROOT_PATH, "experiment")
+EXP_DIR     = os.path.join(ROOT_PATH, "experiments")
 
 
 def _load_config(config_name: str) -> dict:

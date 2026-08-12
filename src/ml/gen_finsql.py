@@ -13,23 +13,23 @@ Pipeline:
 
 Usage:
     uv run python -m src.ml.gen_finsql \
-        --presql experiment/2026-05-26_02-15-18/presql.jsonl \
+        --presql experiments/2026-05-26_02-15-18/presql.jsonl \
         --config OpenText2SQL.json \
         --models Llama-3.2-3B-Instruct-4bit Qwen3-14B-4bit
 
     uv run python -m src.ml.gen_finsql \
-        --presql experiment/2026-05-26_02-15-18/presql.jsonl \
+        --presql experiments/2026-05-26_02-15-18/presql.jsonl \
         --config OpenText2SQL.json \
         --models Llama-3.2-3B-Instruct-4bit Qwen3-14B-4bit \
         --limit 50 --batch-size 4
 
     uv run python -m src.ml.gen_finsql \
-        --presql experiment/2026-05-26_02-15-18/presql.jsonl \
+        --presql experiments/2026-05-26_02-15-18/presql.jsonl \
         --config OpenText2SQL.json \
         --models Qwen3-14B-4bit
 
 Output:
-  experiment/2026-05-26_02-15-18/finsql.jsonl
+  experiments/2026-05-26_02-15-18/finsql.jsonl
   Each line: {question, db_id, source, difficulty, gold_sql,
               presql, presql_model, presql_config, presql_prompt,
               simplified_ddl, foreign_keys, cell_values, few_shot, section_visibility,
@@ -51,12 +51,46 @@ if not ROOT_PATH:
 PROMPTS_DIR = f"{ROOT_PATH}/config/prompt"
 
 
+def write_finsql_jsonl(out_dir: str, records: list, linked: list, results: list, resolved_models: list, config_name: str) -> str:
+    out_path = os.path.join(out_dir, "finsql.jsonl")
+    with open(out_path, "w", encoding="utf-8") as f:
+        for orig, rec_linked, result in zip(records, linked, results):
+            line = {
+                # identity
+                "question":           orig.get("question"),
+                "db_id":              orig.get("db_id"),
+                "source":             orig.get("source"),
+                "difficulty":         orig.get("difficulty"),
+                "gold_sql":           orig.get("gold_sql"),
+                # preSQL step (preserved from input)
+                "presql":             orig.get("presql"),
+                "presql_model":       orig.get("model"),
+                "presql_config":      orig.get("config"),
+                "presql_prompt":      orig.get("prompt"),
+                # schema linking output
+                "simplified_ddl":     rec_linked.get("simplified_ddl"),
+                "foreign_keys":       rec_linked.get("foreign_keys"),
+                "cell_values":        rec_linked.get("cell_values"),
+                "few_shot":           orig.get("few_shot"),
+                "section_visibility": rec_linked.get("section_visibility"),
+                # finSQL step
+                "finsql_prompt":      rec_linked.get("prompt"),
+                "finsql":             result.get("sql"),
+                "all_sql":            result.get("all_sql"),
+                "consistency_score":  result.get("consistency_score"),
+                "models":             resolved_models,
+                "config":             config_name,
+            }
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    return out_path
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Generate finSQL via cross-consistency from a presql.jsonl file."
     )
     parser.add_argument("--presql", required=True,
-                        help="Path to presql.jsonl (e.g. experiment/2026-05-26.../presql.jsonl).")
+                        help="Path to presql.jsonl (e.g. experiments/2026-05-26.../presql.jsonl).")
     parser.add_argument("--config", required=True,
                         help="Prompt config filename, e.g. OpenText2SQL.json")
     parser.add_argument("--models", nargs="+", required=True,
@@ -115,38 +149,8 @@ def main():
     )
 
     # ── Step 6: write finsql.jsonl ────────────────────────────────────────────
-    out_path = presql_path.parent / "finsql.jsonl"
     resolved_models = [resolve_model(m.partition(":")[0]) for m in args.models]
-
-    with open(out_path, "w", encoding="utf-8") as f:
-        for orig, rec_linked, result in zip(records, linked, results):
-            line = {
-                # identity
-                "question":           orig.get("question"),
-                "db_id":              orig.get("db_id"),
-                "source":             orig.get("source"),
-                "difficulty":         orig.get("difficulty"),
-                "gold_sql":           orig.get("gold_sql"),
-                # preSQL step (preserved from input)
-                "presql":             orig.get("presql"),
-                "presql_model":       orig.get("model"),
-                "presql_config":      orig.get("config"),
-                "presql_prompt":      orig.get("prompt"),
-                # schema linking output
-                "simplified_ddl":     rec_linked.get("simplified_ddl"),
-                "foreign_keys":       rec_linked.get("foreign_keys"),
-                "cell_values":        rec_linked.get("cell_values"),
-                "few_shot":           orig.get("few_shot"),
-                "section_visibility": rec_linked.get("section_visibility"),
-                # finSQL step
-                "finsql_prompt":      rec_linked.get("prompt"),
-                "finsql":             result.get("sql"),
-                "all_sql":            result.get("all_sql"),
-                "consistency_score":  result.get("consistency_score"),
-                "models":             resolved_models,
-                "config":             args.config,
-            }
-            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    out_path = write_finsql_jsonl(presql_path.parent, records, linked, results, resolved_models, args.config)
 
     print(f"✓ {len(results)} records written to {out_path}")
 
