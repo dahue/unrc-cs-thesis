@@ -2,7 +2,7 @@
 database/spider/
 data/adapters/
 experiments/
-src/ml/legacy/
+legacy/
 .ipynb_checkpoints/
 __pycache__/
 .venv/
@@ -24,7 +24,7 @@ CLAUDE.md
 *.safetensors
 
 # DON'T ignore:
-!config/prompt/
+!config/prompt/*.json
 !database/OpenText2SQL.sql
 !database/embedding.sql
 !src/ml/models.json
