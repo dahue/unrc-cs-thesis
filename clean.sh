@@ -30,6 +30,10 @@ fi
 echo "Removing databases..."
 rm -rf "$ROOT_PATH/database/OpenText2SQL.db"
 rm -rf "$ROOT_PATH/database/spider"
+echo ""
+
+echo "Removing Python dependencies..."
+rm -rf "$ROOT_PATH/.venv"
 
 echo ""
 echo "Done."

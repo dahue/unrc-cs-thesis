@@ -8,7 +8,7 @@ Public API:
   render_prompt(config, rec, section_visibility=None)                     -> str
   cross_consistency(models, records, batch_size=1, max_tokens=512)       -> List[Dict]
 
-Model keys are short names defined in src/ml/models.json (e.g. "Qwen3-14B-4bit").
+Model keys are short names defined in config/llm/models.json (e.g. "Qwen3-14B-4bit").
 Prompt configs are JSON dicts with sections keyed by name, each having "text" and "visible" fields.
 """
 
@@ -23,8 +23,10 @@ from jinja2 import Environment, meta as jinja_meta
 from mlx_lm import load, batch_generate
 from mlx_lm.sample_utils import make_sampler
 
+from src.util.sampling import sample_per_difficulty
+
 _MODELS_FILE = os.path.normpath(
-    os.path.join(os.path.dirname(__file__), "..", "ml", "models.json")
+    os.path.join(os.path.dirname(__file__), "..", "..", "config", "llm", "models.json")
 )
 
 
@@ -302,7 +304,8 @@ def prompt_generation(
         db_path:         Path to OpenText2SQL.db.
         source:          Filter by 'train', 'dev', or 'test'. None = all.
         difficulty:      Filter by one or more of 'easy', 'medium', 'hard', 'extra'. None = all.
-        limit:           Cap the number of rows returned.
+        limit:           Randomly sample up to this many rows per difficulty.
+                         None returns every matching row.
         top_k_few_shot:  Number of few-shot examples to retrieve (only when config uses {{few_shot}}).
 
     Returns:
@@ -331,14 +334,15 @@ def prompt_generation(
         params.extend(difficulties)
 
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    limit_clause = f"LIMIT {limit}" if limit else ""
-    sql = f"SELECT id, db_id, source, difficulty, question, query, simplified_ddl, foreign_keys FROM gold_dataset {where} {limit_clause}"
+    sql = f"SELECT id, db_id, source, difficulty, question, query, simplified_ddl, foreign_keys FROM gold_dataset {where} ORDER BY id"
 
     conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         rows = conn.execute(sql, params).fetchall()
     finally:
         conn.close()
+
+    rows = sample_per_difficulty(rows, limit, difficulty_getter=lambda row: row[3])
 
     env = Environment()
     tmpl = env.from_string(template)

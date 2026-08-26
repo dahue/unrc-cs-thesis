@@ -1,4 +1,4 @@
-# Natural Language to SQL Translation using Open-Source LLMs
+# Natural Language to SQL Translation using Open-Weights Models
 
 This project is part of my undergraduate thesis for a Bachelor's degree in Computer Science.
 
@@ -6,11 +6,11 @@ This project is part of my undergraduate thesis for a Bachelor's degree in Compu
 
 The goal is to explore how large language models (LLMs) can be used to automatically translate natural language questions into SQL queries, making database interaction more accessible to non-technical users.
 
-We focus on using **open-source LLMs** that can run on modest hardware, providing a cost-effective alternative to proprietary solutions.
+We focus on using **open-weights models** that can run on modest hardware, providing a cost-effective alternative to proprietary solutions. Only the weights are available to run locally; many of these models are not open source.
 
 ## 🧠 Core Ideas
 
-- Evaluate and compare open-source LLMs for the Text-to-SQL task
+- Evaluate and compare open-weights models for the Text-to-SQL task
 - Explore effective prompt engineering techniques
 - Address natural language ambiguities and complex database schemas
 - Utilize methods like few-shot learning, schema linking, and self-consistency
@@ -39,18 +39,13 @@ brew install uv wget
 git clone https://github.com/dahue/unrc-cs-thesis.git && cd unrc-cs-thesis
 ```
 
-4. Create a virtual environment and install dependencies:
-```bash
-uv sync
-```
-
-5. Configure environment variables:
+4. Configure environment variables:
 ```bash
 cp .env.example .env
 # then edit .env and set ROOT_PATH to the absolute path of this repo
 ```
 
-6. Run the initialization script:
+5. Run the initialization script (installs Python deps, downloads Spider, builds the DB):
 ```bash
 sh init.sh
 ```
@@ -67,36 +62,36 @@ The main entry point is `run.py`, which executes three steps end-to-end:
 
 All output lands in a timestamped experiment directory: `experiments/<YYYY-MM-DD_HH-MM-SS>/`.
 
+`--limit N` selects a deterministic random sample of up to `N` questions from each
+matching difficulty, using the fixed experiment seed `42`. Omit `--limit` to include
+all matching questions.
+
 ```bash
 # Single model (no cross-consistency): first model used for preSQL, same model for finSQL
 uv run python -m src.ml.run \
     --config OpenText2SQL.json \
-    --models Qwen3-14B-4bit \
-    --source test --difficulty hard --limit 100
+    --models Llama-3.2-3B-Instruct-4bit \
+    --source test --difficulty hard --limit 100 \
+    --batch-size 10
 
 # Multiple models: first model for preSQL, all models for finSQL cross-consistency
 uv run python -m src.ml.run \
     --config OpenText2SQL.json \
-    --models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit gemma-3-12b-it-4bit-DWQ \
+    --models Llama-3.2-3B-Instruct-4bit Qwen3.5-9B-MLX-4bit gemma-3-12b-it-4bit-DWQ \
     --source test --difficulty hard --limit 100 \
-    --batch-size 2
+    --batch-size 10
 
 # Separate control over preSQL and finSQL models
 uv run python -m src.ml.run \
     --config OpenText2SQL.json \
-    --presql-model Qwen3.5-9B-MLX-4bit \
-    --finsql-models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit \
-    --source test --difficulty hard --limit 100
+    --presql-model Llama-3.2-3B-Instruct-4bit \
+    --finsql-models Llama-3.2-3B-Instruct-4bit Qwen3.5-9B-MLX-4bit gemma-3-12b-it-4bit-DWQ \
+    --source test --difficulty hard --limit 100 \
+    --batch-size 10
 
-# Baseline: skip preSQL and feed the full-schema prompt directly into finSQL
-uv run python -m src.ml.run \
-    --config OpenText2SQL.json \
-    --skip-presql \
-    --finsql-models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit \
-    --source test --difficulty hard --limit 100
 ```
 
-Model short keys (defined in `src/ml/models.json`) map to their full HuggingFace paths and are downloaded automatically on first use.
+Model short keys (defined in `config/llm/models.json`) map to their full HuggingFace paths and are downloaded automatically on first use.
 
 ### Standalone scripts
 
@@ -106,14 +101,15 @@ The three pipeline steps can also be run independently:
 # Step 1: generate preSQL predictions
 uv run python -m src.ml.gen_presql \
     --config OpenText2SQL.json \
-    --model Qwen3-14B-4bit \
-    --source test --difficulty hard --limit 100
+    --model Llama-3.2-3B-Instruct-4bit \
+    --source test --difficulty hard --limit 100 \
+    --batch-size 10
 
 # Step 2: generate finSQL from an existing presql.jsonl
 uv run python -m src.ml.gen_finsql \
-    --presql experiments/2026-05-26_02-15-18/presql.jsonl \
     --config OpenText2SQL.json \
-    --models Qwen3.5-9B-MLX-4bit Qwen3-14B-4bit
+    --presql experiments/2026-05-26_02-15-18/presql.jsonl \
+    --models Llama-3.2-3B-Instruct-4bit Qwen3.5-9B-MLX-4bit gemma-3-12b-it-4bit-DWQ \
 
 # Step 3: evaluate and export metrics
 uv run python -m src.ml.gen_metrics \
@@ -122,9 +118,44 @@ uv run python -m src.ml.gen_metrics \
     --raw-metrics
 ```
 
-## 📅 Timeline
+## 🗄️ Querying the database
 
-Development started in **November 2024**.
+`init.sh` writes `database/OpenText2SQL.db`. Open that file in DBeaver (or any SQLite client).
+
+### `gold_dataset`
+
+Curated Spider rows used by the ML pipeline (`is_valid = 1`).
+
+```sql
+SELECT source, difficulty, COUNT(*) AS n
+FROM gold_dataset
+GROUP BY source, difficulty
+ORDER BY source, difficulty;
+
+SELECT id, db_id, source, difficulty, question, query
+FROM gold_dataset
+WHERE source = 'test' AND difficulty = 'hard'
+LIMIT 10;
+```
+
+### `embedding_dataset`
+
+Few-shot vector index (`sqlite-vec` `vec0` virtual table, training rows only). DBeaver cannot read it until the extension is loaded.
+
+Enable loading extensions on the SQLite connection, then run this once per session (replace `ROOT_PATH` with the value from `.env`):
+
+```sql
+SELECT load_extension('ROOT_PATH/.venv/lib/python3.12/site-packages/sqlite_vec/vec0.dylib');
+```
+
+After that:
+
+```sql
+SELECT id, db_id, source, question, skeleton_question
+FROM embedding_dataset
+LIMIT 10;
+```
+
 
 ## 👨‍💻 Author
 

@@ -27,4 +27,4 @@ CLAUDE.md
 !config/prompt/*.json
 !database/OpenText2SQL.sql
 !database/embedding.sql
-!src/ml/models.json
+!config/llm/*.json

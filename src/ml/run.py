@@ -77,7 +77,7 @@ def main():
     parser.add_argument("--difficulty", nargs="*", choices=["easy", "medium", "hard", "extra"],
                         help="Filter by one or more difficulty levels.")
     parser.add_argument("--limit", type=int, default=None,
-                        help="Maximum number of records to process.")
+                        help="Random records to sample per difficulty; omit to use all records.")
     parser.add_argument("--top-k-few-shot", type=int, default=3,
                         help="Few-shot examples per prompt (default: 3).")
 
