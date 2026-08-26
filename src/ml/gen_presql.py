@@ -70,13 +70,13 @@ def main():
     parser.add_argument("--difficulty", nargs="*", choices=["easy", "medium", "hard", "extra"],
                         help="Filter by one or more difficulty levels.")
     parser.add_argument("--limit", type=int, default=None,
-                        help="Maximum number of records to process.")
+                        help="Random records to sample per difficulty; omit to use all records.")
     parser.add_argument("--top-k-few-shot", type=int, default=3,
                         help="Few-shot examples to retrieve per prompt (default: 3).")
 
     # Inference params (mirrors test_inference.py)
     parser.add_argument("--model", required=True,
-                        help="Model key (from models.json) or full HuggingFace path.")
+                        help="Model key (from config/llm/models.json) or full HuggingFace path.")
     parser.add_argument("--adapter-path", default=None,
                         help="Path to LoRA adapter directory (required for :fine-tuned models).")
     parser.add_argument("--batch-size", type=int, default=1,

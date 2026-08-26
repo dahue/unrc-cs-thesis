@@ -1,0 +1,14 @@
+{
+    "optimization_rule": {
+        "text": "Given the database schema, write a SQL query that answers the question.",
+        "visible": true
+    },
+    "schema": {
+        "text": "### Schema:\n{{full_ddl}}",
+        "visible": true
+    },
+    "query": {
+        "text": "### Question:\n{{question}}",
+        "visible": true
+    }
+}

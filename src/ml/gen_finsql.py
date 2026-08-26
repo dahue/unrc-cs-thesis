@@ -42,6 +42,8 @@ import argparse
 from pathlib import Path
 from dotenv import load_dotenv
 
+from src.util.sampling import sample_per_difficulty
+
 load_dotenv()
 
 ROOT_PATH = os.environ.get("ROOT_PATH")
@@ -96,7 +98,7 @@ def main():
     parser.add_argument("--models", nargs="+", required=True,
                         help="Two or more model specs for cross-consistency (short keys or full HuggingFace paths).")
     parser.add_argument("--limit", type=int, default=None,
-                        help="Maximum number of records to process.")
+                        help="Random records to sample per difficulty; omit to use all records.")
     parser.add_argument("--batch-size", type=int, default=1,
                         help="Prompts per inference batch (default: 1).")
     parser.add_argument("--max-tokens", type=int, default=512,
@@ -111,8 +113,11 @@ def main():
     with open(presql_path, encoding="utf-8") as f:
         records = [json.loads(line) for line in f if line.strip()]
 
-    if args.limit:
-        records = records[:args.limit]
+    records = sample_per_difficulty(
+        records,
+        args.limit,
+        difficulty_getter=lambda record: record.get("difficulty"),
+    )
 
     print(f"Loaded {len(records)} records from {presql_path}")
 

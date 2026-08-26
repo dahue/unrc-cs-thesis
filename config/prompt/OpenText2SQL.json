@@ -1,0 +1,26 @@
+{
+    "optimization_rule": {
+        "text": "### Answer the question by SQLite SQL query only and with no explanation. You must minimize SQL execution time while ensuring correctness.",
+        "visible": true
+    },
+    "schema": {
+        "text": "### Sqlite SQL tables, with their properties:\n#\n# {{simplified_ddl}}\n#",
+        "visible": true
+    },
+    "reference_values": {
+        "text": "### Here is some data information about database references.\n#\n# {{cell_values}}\n#",
+        "visible": true
+    },
+    "foreign_keys": {
+        "text": "### Foreign key information of SQLite tables, used for table joins:\n#\n# {{foreign_keys}}\n#",
+        "visible": true
+    },
+    "few_shot": {
+        "text": "### Some example pairs of questions and corresponding SQL queries are provided based on similar questions:\n#\n# {{few_shot}}\n#",
+        "visible": true
+    },
+    "query": {
+        "text": "### {{question}}",
+        "visible": true
+    }
+}

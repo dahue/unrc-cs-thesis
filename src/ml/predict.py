@@ -26,6 +26,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 from jinja2 import Environment
 
+from src.util.sampling import sample_per_difficulty
+
 load_dotenv()
 
 ROOT_PATH   = os.environ.get("ROOT_PATH", ".")
@@ -68,10 +70,14 @@ def _load_records(
             placeholders = ",".join("?" * len(difficulty))
             query += f" AND difficulty IN ({placeholders})"
             params.extend(difficulty)
-        if limit:
-            query += f" LIMIT {limit}"
+        query += " ORDER BY id"
         rows = conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+        records = [dict(r) for r in rows]
+        return sample_per_difficulty(
+            records,
+            limit,
+            difficulty_getter=lambda record: record["difficulty"],
+        )
     finally:
         conn.close()
 
@@ -179,7 +185,10 @@ if __name__ == "__main__":
         choices=["easy", "medium", "hard", "extra"],
         help="Filter by difficulty level(s).",
     )
-    parser.add_argument("--limit",      type=int, default=None, help="Max records.")
+    parser.add_argument(
+        "--limit", type=int, default=None,
+        help="Random records to sample per difficulty; omit to use all records.",
+    )
     parser.add_argument("--batch-size", type=int, default=1,    help="Inference batch size.")
     parser.add_argument("--max-tokens", type=int, default=256,  help="Max tokens per prediction.")
     parser.add_argument("--out-dir",    default=None,           help="Output directory.")

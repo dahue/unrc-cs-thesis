@@ -1,15 +1,23 @@
 #!/bin/bash
+set -e
+
+if [ ! -f .env ]; then
+    echo "❌ .env not found. Copy .env.example to .env and set ROOT_PATH to the absolute path of this repo:"
+    echo "   cp .env.example .env"
+    exit 1
+fi
 
 # Load .env file into the current shell session
 set -o allexport
 source .env
 set +o allexport
 
-# Now use the variables
 echo "Project root is: $ROOT_PATH"
 
-# Exit on any error
-set -e
+echo "📦 Installing Python dependencies..."
+uv sync
+echo "✅ Dependencies installed."
+echo ""
 
 # Set TMP_DIR to /tmp if it is not defined
 if [ -z "$TMP_DIR" ]; then

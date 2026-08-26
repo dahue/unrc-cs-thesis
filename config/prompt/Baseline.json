@@ -1,0 +1,26 @@
+{
+    "optimization_rule": {
+        "text": "Answer the question by sqlite SQL query only and with no explanation.",
+        "visible": true
+    },
+    "schema": {
+        "text": "Sqlite SQL tables, with their properties: \n {{simplified_ddl}}\n",
+        "visible": true
+    },
+    "reference_values": {
+        "text": "",
+        "visible": false
+    },
+    "foreign_keys": {
+        "text": "",
+        "visible": false
+    },
+    "few_shot": {
+        "text": "",
+        "visible": false
+    },
+    "query": {
+        "text": "{{question}}",
+        "visible": true
+    }
+}
