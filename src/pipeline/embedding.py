@@ -11,7 +11,6 @@ CLI:
 """
 
 import os
-import re
 import sqlite3
 
 import nltk
@@ -38,42 +37,19 @@ def _load_schema():
         return f.read()
 
 
-def _get_existing_dim(conn):
-    """Return the vector dimension of the existing table, or None if it doesn't exist."""
-    row = conn.execute(
-        "SELECT sql FROM sqlite_master WHERE type='table' AND name=?", (_TABLE,)
-    ).fetchone()
-    if row is None:
-        return None
-    match = re.search(r'float\[(\d+)\]', row[0])
-    return int(match.group(1)) if match else None
-
-
 def build_index(gold_db_path, index_db_path):
     """
     Build (or rebuild) the few-shot vector index from gold DB training entries.
 
-    Vector dimension is derived automatically from the spaCy model.
-    - Creates the table if it doesn't exist.
-    - Clears and repopulates if the model dimension matches the existing table.
-    - Drops and recreates the table if the model dimension changed.
+    Recreates the virtual table so schema changes (such as the distance metric)
+    take effect before repopulating the training vectors.
     """
     nlp = _get_nlp()
-    vector_dim = nlp.vocab.vectors_length
 
     conn = _open_vec_conn(index_db_path)
     try:
-        existing_dim = _get_existing_dim(conn)
-
-        if existing_dim is None:
-            print(f"Creating {_TABLE} (vector_dim={vector_dim})")
-            conn.executescript(_load_schema())
-        elif existing_dim != vector_dim:
-            print(f"Vector dimension changed ({existing_dim} → {vector_dim}), recreating table.")
-            conn.executescript(_load_schema())
-        else:
-            print(f"Rebuilding {_TABLE} (vector_dim={vector_dim})")
-            conn.execute(f"DELETE FROM {_TABLE}")
+        print(f"Recreating {_TABLE} (vector_dim={nlp.vocab.vectors_length})")
+        conn.executescript(_load_schema())
 
         if gold_db_path == index_db_path:
             rows = conn.execute(

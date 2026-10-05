@@ -1,6 +1,7 @@
 # Ignore folders
 database/spider/
 data/adapters/
+scripts/adapter/
 experiments/
 legacy/
 .ipynb_checkpoints/
